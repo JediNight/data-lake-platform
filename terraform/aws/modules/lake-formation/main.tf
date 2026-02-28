@@ -75,17 +75,10 @@ locals {
 resource "aws_lakeformation_data_lake_settings" "this" {
   admins = [var.admin_role_arn]
 
-  # Override defaults to remove IAMAllowedPrincipals -- this forces all
-  # access through Lake Formation grants rather than plain IAM.
-  create_database_default_permissions {
-    permissions = []
-    principal   = ""
-  }
-
-  create_table_default_permissions {
-    permissions = []
-    principal   = ""
-  }
+  # Omitting create_database_default_permissions and
+  # create_table_default_permissions removes the default
+  # IAMAllowedPrincipals grants, forcing all access through
+  # Lake Formation grants rather than plain IAM.
 }
 
 # =============================================================================

@@ -71,8 +71,6 @@ resource "aws_msk_configuration" "this" {
     num.partitions = 3
     log.retention.hours = 168
   PROPERTIES
-
-  tags = local.common_tags
 }
 
 # =============================================================================

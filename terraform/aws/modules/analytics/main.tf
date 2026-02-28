@@ -68,13 +68,8 @@ resource "aws_athena_workgroup" "this" {
     enforce_workgroup_configuration    = true
     publish_cloudwatch_metrics_enabled = true
 
-    # Per-query byte scan limit (0 = unlimited)
-    dynamic "bytes_scanned_cutoff_per_query" {
-      for_each = each.value.scan_limit_bytes > 0 ? [each.value.scan_limit_bytes] : []
-      content {
-        max_bytes = bytes_scanned_cutoff_per_query.value
-      }
-    }
+    # Per-query byte scan limit (0 = unlimited → null omits the limit)
+    bytes_scanned_cutoff_per_query = each.value.scan_limit_bytes > 0 ? each.value.scan_limit_bytes : null
 
     result_configuration {
       output_location = "s3://${var.query_results_bucket_id}/${each.key}/"
