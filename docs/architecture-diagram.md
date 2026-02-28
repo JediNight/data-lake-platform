@@ -78,10 +78,10 @@ flowchart TD
             WG_DA["data-analysts"]
             WG_DE["data-engineers"]
         end
-        subgraph PERSONAS["IAM Personas"]
-            P_FIN["Finance Analyst"]
-            P_DA["Data Analyst"]
-            P_DE["Data Engineer"]
+        subgraph PERSONAS["Identity Center Groups"]
+            P_FIN["FinanceAnalysts\nIC Group"]
+            P_DA["DataAnalysts\nIC Group"]
+            P_DE["DataEngineers\nIC Group"]
         end
     end
 
@@ -210,10 +210,10 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    subgraph PERSONAS["IAM Personas"]
-        FIN["Finance Analyst"]
-        DA["Data Analyst"]
-        DE["Data Engineer"]
+    subgraph PERSONAS["Identity Center Groups"]
+        FIN["FinanceAnalysts"]
+        DA["DataAnalysts"]
+        DE["DataEngineers"]
     end
 
     subgraph LFTAG_GRANTS["LF-Tag Grants"]
@@ -286,7 +286,8 @@ flowchart TD
     STR["streaming\nMSK Provisioned cluster"]
     DLS["data-lake-storage\nS3 buckets, KMS keys,\nbucket deny policies"]
     GLU["glue-catalog\n6 Glue databases,\nschema registry"]
-    IAM["iam-personas\n3 persona roles,\nservice roles"]
+    IC["identity-center\n3 IC groups,\npermission sets, demo users"]
+    SR["service-roles\nKafka Connect IRSA"]
     LF["lake-formation\nLF-Tags, grants,\nS3 registrations"]
     ANA["analytics\nAthena workgroups,\nnamed queries"]
     OBS["observability\nCloudTrail, audit bucket,\nCloudWatch"]
@@ -294,11 +295,14 @@ flowchart TD
     NET --> STR
     NET --> DLS
     DLS --> GLU
-    DLS --> IAM
+    DLS --> IC
+    DLS --> SR
     DLS --> OBS
     DLS --> ANA
-    IAM --> LF
+    IC --> LF
+    SR --> DLS
     GLU --> LF
+    GLU --> SR
 
     classDef infra fill:#e8e8e8,stroke:#666,color:#000
     classDef data fill:#cce5ff,stroke:#0066cc,color:#000
@@ -307,7 +311,7 @@ flowchart TD
 
     class NET,STR infra
     class DLS,GLU data
-    class IAM,LF,ANA access
+    class IC,SR,LF,ANA access
     class OBS audit
 ```
 

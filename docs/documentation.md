@@ -68,7 +68,8 @@ data-lake-platform/
 │       │   ├── data-lake-storage/      # S3 buckets, KMS keys, bucket policies
 │       │   ├── streaming/              # MSK Provisioned cluster
 │       │   ├── glue-catalog/           # 6 Glue databases, schema registry
-│       │   ├── iam-personas/           # 3 persona roles + service roles
+│       │   ├── identity-center/        # 3 IC groups, permission sets, demo users
+│       │   ├── service-roles/          # Kafka Connect IRSA role
 │       │   ├── lake-formation/         # LF-Tags, grants, S3 registrations
 │       │   ├── analytics/              # Athena workgroups, named queries
 │       │   └── observability/          # CloudTrail, audit bucket, QuickSight
@@ -216,21 +217,33 @@ The default `IAMAllowedPrincipals` is removed from Lake Formation settings, forc
 Both data lake buckets carry a bucket policy that **DENIES** `s3:GetObject` and `s3:PutObject` for all principals except:
 
 1. **Lake Formation service-linked role** -- vends temporary credentials for Athena queries
-2. **Kafka Connect IRSA role** -- direct S3 write for Iceberg sink connectors
-3. **Data Engineer role** -- exercise requires direct S3 access for ETL
+2. **Kafka Connect IRSA role** (`service-roles` module) -- direct S3 write for Iceberg sink connectors
+3. **DataEngineer SSO role** (wildcard `ArnLike` pattern) -- direct S3 access for ETL
 4. **Break-glass admin role**
 
 Without this policy, any IAM principal with `s3:GetObject` could read data directly from S3, bypassing Lake Formation column/row-level security.
 
-### IAM Personas and Access Levels
+### Identity Center Groups and Access Levels
 
-**Module:** [`terraform/aws/modules/iam-personas/main.tf`](../terraform/aws/modules/iam-personas/main.tf)
+**Modules:** [`terraform/aws/modules/identity-center/`](../terraform/aws/modules/identity-center/) (human identities) and [`terraform/aws/modules/service-roles/`](../terraform/aws/modules/service-roles/) (machine identities)
 
-| Persona | LF-Tag Grant | Athena Workgroup | Direct S3 |
-|---------|-------------|-----------------|-----------|
-| **Finance Analyst** | `SELECT` where `sensitivity IN (mnpi, non-mnpi)` AND `layer IN (curated, analytics)` | `finance-analysts` (scan-limited) | No |
-| **Data Analyst** | `SELECT` where `sensitivity = non-mnpi` AND `layer IN (curated, analytics)` | `data-analysts` (scan-limited) | No |
-| **Data Engineer** | `ALL` where `sensitivity IN (mnpi, non-mnpi)` AND `layer IN (raw, curated, analytics)` + `DATA_LOCATION_ACCESS` | `data-engineers` (unlimited) | Yes (exempted from deny policy) |
+Human identity management uses **IAM Identity Center** (IC) groups and permission sets instead of direct IAM roles. Each IC group maps to a Lake Formation grant using `arn:aws:identitystore:::group/<group_id>` principals. Three demo users are provisioned for validation.
+
+| IC Group | Permission Set | LF-Tag Grant | Athena Workgroup | Direct S3 |
+|----------|---------------|-------------|-----------------|-----------|
+| **FinanceAnalysts** | FinanceAnalyst | `SELECT` where `sensitivity IN (mnpi, non-mnpi)` AND `layer IN (curated, analytics)` | `finance-analysts` (scan-limited) | No |
+| **DataAnalysts** | DataAnalyst | `SELECT` where `sensitivity = non-mnpi` AND `layer IN (curated, analytics)` | `data-analysts` (scan-limited) | No |
+| **DataEngineers** | DataEngineer | `ALL` where `sensitivity IN (mnpi, non-mnpi)` AND `layer IN (raw, curated, analytics)` + `DATA_LOCATION_ACCESS` | `data-engineers` (unlimited) | Yes (SSO role exempted via wildcard) |
+
+**Demo Users:**
+
+| User | Email | IC Group |
+|------|-------|----------|
+| jane.finance | jane.finance@datalake.demo | FinanceAnalysts |
+| alex.analyst | alex.analyst@datalake.demo | DataAnalysts |
+| sam.engineer | sam.engineer@datalake.demo | DataEngineers |
+
+**Machine Identity:** The Kafka Connect IRSA role is managed separately in the `service-roles` module, keeping human and machine identities cleanly separated.
 
 ### Endpoint Security
 
@@ -338,7 +351,7 @@ task down           # Destroy everything (Tilt + Terraform)
 
 ### AWS Deployment
 
-The AWS infrastructure is managed through 8 Terraform modules composed in environment-specific root modules.
+The AWS infrastructure is managed through 9 Terraform modules composed in environment-specific root modules.
 
 **Configuration files:**
 - [`terraform/aws/environments/dev/terraform.tfvars`](../terraform/aws/environments/dev/terraform.tfvars) -- Dev settings
@@ -365,8 +378,10 @@ networking
     └──► streaming (needs subnet_ids, msk_security_group_id)
     └──► data_lake_storage (independent)
              └──► glue_catalog (needs bucket IDs)
-             └──► iam_personas (needs bucket ARNs, cluster ARN)
-                      └──► lake_formation (needs role ARNs, database names)
+             └──► identity_center (needs bucket ARNs)
+             └──► service_roles (needs bucket ARNs, cluster ARN, registry ARN)
+             │         └──► data_lake_storage (allowed_principal_arns)
+             └──► lake_formation (needs IC group IDs, database names)
              └──► observability (needs bucket ARNs)
              └──► analytics (needs query results bucket)
 ```
@@ -636,3 +651,17 @@ The curated layer currently uses manual SQL scripts in [`scripts/01_curated/`](.
 The curated layer then produces clean, current-state tables via `MERGE INTO` queries (see [`scripts/01_curated/`](../scripts/01_curated/)) that deduplicate the raw event stream by taking the latest event per primary key.
 
 **Implementation detail:** Raw Iceberg tables use `iceberg.tables.upsert-mode-enabled=false` to enforce append-only behavior at the connector level.
+
+### 7. IAM Identity Center over Direct IAM Roles for Human Access
+
+**Choice:** IAM Identity Center (IC) groups and permission sets for human identity management, with a separate `service-roles` module for machine identities (Kafka Connect IRSA).
+
+**Rationale:** Identity Center provides centralized human identity management with federation support, automatic SSO role provisioning, and clean separation of human vs. machine identities. Lake Formation grants use IC group ARN principals (`arn:aws:identitystore:::group/<id>`) via trusted identity propagation, enabling group-based access control without managing individual IAM role ARNs.
+
+**Benefits:**
+- **Scalable**: Add users to IC groups without Terraform changes
+- **Auditable**: IC login events tracked in CloudTrail; SSO sessions have clear identity attribution
+- **Federated**: IC supports external IdP integration (Okta, Azure AD) for production
+- **Separation of concerns**: Human identities (IC) cleanly separated from machine identities (IRSA)
+
+**Trade-off:** IC principals cannot be Lake Formation administrators (hard AWS limitation), so `admin_role_arn` remains a traditional IAM role. The `aws_lakeformation_identity_center_configuration` Terraform resource requires provider >= 6.19 (project uses ~> 5.0), so trusted identity propagation setup is a manual CLI step until the provider is upgraded.
