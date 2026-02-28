@@ -4,6 +4,8 @@ metadata:
   name: iceberg-sink-nonmnpi
   labels:
     strimzi.io/cluster: data-lake-connect
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   class: io.tabular.iceberg.connect.IcebergSinkConnector
   tasksMax: 1

@@ -4,6 +4,7 @@ metadata:
   name: data-lake-connect
   annotations:
     strimzi.io/use-connector-resources: "true"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   version: 3.6.0
   replicas: 1

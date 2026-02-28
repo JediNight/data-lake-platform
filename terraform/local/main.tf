@@ -157,48 +157,6 @@ resource "kubectl_manifest" "appset_management" {
   yaml_body = file("${path.module}/../../appset-management.yaml")
 }
 
-# =============================================================================
-# Strimzi Namespace (for Kafka Connect workloads)
-# =============================================================================
-
-resource "kubernetes_namespace_v1" "strimzi" {
-  metadata {
-    name = "strimzi"
-  }
-
-  depends_on = [kind_cluster.this]
-}
-
-# =============================================================================
-# Data Namespace (for sample-postgres and other data workloads)
-# =============================================================================
-
-resource "kubernetes_namespace_v1" "data" {
-  metadata {
-    name = "data"
-  }
-
-  depends_on = [kind_cluster.this]
-}
-
-# =============================================================================
-# Strimzi Operator (Helm)
-# =============================================================================
-
-resource "helm_release" "strimzi" {
-  name       = "strimzi"
-  repository = "https://strimzi.io/charts/"
-  chart      = "strimzi-kafka-operator"
-  namespace  = kubernetes_namespace_v1.strimzi.metadata[0].name
-  version    = "0.44.0"
-
-  set {
-    name  = "watchAnyNamespace"
-    value = "true"
-  }
-
-  depends_on = [
-    kubernetes_namespace_v1.strimzi,
-    null_resource.local_path_provisioner,
-  ]
-}
+# Strimzi operator, strimzi namespace, and data namespace are all managed by
+# ArgoCD via ApplicationSets with sync waves (see strimzi-operator/ directory).
+# Terraform only bootstraps: Kind cluster + ArgoCD + root Application.

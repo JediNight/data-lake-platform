@@ -7,12 +7,20 @@ global:
 
 configs:
   params:
-    server.insecure: true
-    application.namespaces: "*"
-    applicationsetcontroller.namespaces: "*"
+    server.insecure: "true"
+    server.enable.gzip: "true"
+    applicationsetcontroller.policy: sync
   cm:
     timeout.reconciliation: 5s
-    kustomize.buildOptions: "--enable-alpha-plugins --enable-exec"
+    admin.enabled: "true"
+    kustomize.buildOptions: "--enable-helm --enable-alpha-plugins --enable-exec"
+  rbac:
+    policy.default: role:admin
+  repositories:
+    data-lake-platform:
+      url: file:///mnt/data-lake-platform
+      type: git
+      name: data-lake-platform
 
 server:
   service:
@@ -42,6 +50,10 @@ repoServer:
         secretName: sops-age-key
     - name: custom-tools
       emptyDir: {}
+    - name: data-lake-platform
+      hostPath:
+        path: /mnt/data-lake-platform
+        type: Directory
   initContainers:
     - name: install-ksops
       image: viaductoss/ksops:v4.3.2
@@ -63,11 +75,19 @@ repoServer:
       subPath: kustomize
     - mountPath: /home/argocd/.config/sops/age
       name: sops-age-key
+    - mountPath: /mnt/data-lake-platform
+      name: data-lake-platform
   env:
     - name: SOPS_AGE_KEY_FILE
       value: /home/argocd/.config/sops/age/keys.txt
     - name: XDG_CONFIG_HOME
       value: /home/argocd/.config
+    - name: GIT_CONFIG_COUNT
+      value: "1"
+    - name: GIT_CONFIG_KEY_0
+      value: safe.directory
+    - name: GIT_CONFIG_VALUE_0
+      value: /mnt/data-lake-platform
   resources:
     requests:
       cpu: 50m
