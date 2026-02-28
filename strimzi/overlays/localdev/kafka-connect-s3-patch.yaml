@@ -7,9 +7,8 @@ spec:
     pod:
       volumes:
         - name: aws-credentials
-          hostPath:
-            path: /mnt/aws
-            type: Directory
+          secret:
+            secretName: aws-credentials
     connectContainer:
       volumeMounts:
         - name: aws-credentials
