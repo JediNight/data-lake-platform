@@ -160,6 +160,37 @@ tasks:
           psql -U postgres -d trading < scripts/00_seed/seed-data.sql
 
   # =========================================================================
+  # Testing
+  # =========================================================================
+
+  test:unit:
+    desc: Run producer-api unit tests with coverage
+    dir: producer-api
+    cmds:
+      - |
+        source .venv/bin/activate 2>/dev/null || true
+        pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
+
+  test:unit:quick:
+    desc: Run producer-api unit tests (no coverage)
+    dir: producer-api
+    cmds:
+      - |
+        source .venv/bin/activate 2>/dev/null || true
+        pytest tests/ -v --tb=short
+
+  validate:tf:
+    desc: Validate all Terraform environments
+    cmds:
+      - |
+        for env in dev prod; do
+          echo "=== Validating $env ==="
+          terraform -chdir=terraform/aws/environments/$env init -backend=false -input=false > /dev/null 2>&1
+          terraform -chdir=terraform/aws/environments/$env validate
+          echo ""
+        done
+
+  # =========================================================================
   # Cleanup
   # =========================================================================
 
