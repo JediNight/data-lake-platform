@@ -17,5 +17,9 @@ keys.txt
 # OS
 .DS_Store
 
+# Trash
+**/TRASH/
+**/TRASH-FILES.md
+
 # Tilt
 tilt_modules/
