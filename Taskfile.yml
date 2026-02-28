@@ -195,6 +195,11 @@ tasks:
         source .venv/bin/activate 2>/dev/null || true
         pytest tests/test_alpaca_transforms.py -v
 
+  test:integration:
+    desc: Run local integration tests (Kind cluster must be running)
+    cmds:
+      - bash scripts/integration/run-tests.sh
+
   validate:tf:
     desc: Validate all Terraform environments
     cmds:
