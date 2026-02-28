@@ -14,6 +14,12 @@ configs:
     timeout.reconciliation: 5s
     admin.enabled: "true"
     kustomize.buildOptions: "--enable-helm --enable-alpha-plugins --enable-exec"
+    resource.customizations.ignoreDifferences.apps_Deployment: |
+      jqPathExpressions:
+        - .status
+    resource.customizations.ignoreDifferences.apps_StatefulSet: |
+      jqPathExpressions:
+        - .status
   rbac:
     policy.default: role:admin
   repositories:
