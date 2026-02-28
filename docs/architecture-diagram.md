@@ -25,6 +25,8 @@ flowchart TD
         SP_MD["Market Data\nFeed Producer"]
     end
 
+    PRODUCER["Producer API\nFastAPI + Simulator"]
+
     subgraph KAFKA["Kafka: MSK Provisioned / Local Strimzi"]
         subgraph MNPI_TOPICS["MNPI Topics"]
             KT1["cdc.trading.orders"]
@@ -104,6 +106,10 @@ flowchart TD
     SP_OE --> KT4
     SP_MD --> KT7
 
+    PRODUCER -->|"INSERT"| SOURCE
+    PRODUCER -->|"produce"| KT4
+    PRODUCER -->|"produce"| KT7
+
     KT1 --> SINK_MNPI
     KT2 --> SINK_MNPI
     KT3 --> SINK_MNPI
@@ -149,11 +155,13 @@ flowchart TD
     classDef nonmnpi fill:#ccffcc,stroke:#009900,color:#000
     classDef kafka fill:#e6e0f8,stroke:#6633cc,color:#000
     classDef audit fill:#fff3cd,stroke:#cc9900,color:#000
+    classDef producer fill:#ddeeff,stroke:#3366cc,color:#000
 
     class T_ORD,T_TRD,T_POS,KT1,KT2,KT3,KT4,SINK_MNPI,RAW_M,CUR_M,ANA_M,DB1,DB2,DB3 mnpi
     class T_ACC,T_INS,KT5,KT6,KT7,SINK_NONMNPI,RAW_N,CUR_N,ANA_N,DB4,DB5,DB6 nonmnpi
     class KAFKA,MNPI_TOPICS,NONMNPI_TOPICS kafka
     class CT,S3_AUDIT,CW audit
+    class PRODUCER producer
 ```
 
 ---

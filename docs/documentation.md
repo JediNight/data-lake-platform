@@ -7,8 +7,9 @@
 3. [Security Architecture](#3-security-architecture)
 4. [Deployment Guide](#4-deployment-guide)
 5. [Query Examples](#5-query-examples)
-6. [Production Considerations](#6-production-considerations)
-7. [Decision Log](#7-decision-log)
+6. [Producer API](#6-producer-api)
+7. [Production Considerations](#7-production-considerations)
+8. [Decision Log](#8-decision-log)
 
 ---
 
@@ -87,6 +88,8 @@ data-lake-platform/
 │   └── base/
 │       ├── statefulset.yaml            # PostgreSQL StatefulSet
 │       └── init-schema.sql             # CREATE TABLE for 5 source tables
+│
+├── producer-api/                       # FastAPI producer service with trading simulator
 │
 ├── scripts/
 │   ├── 00_seed/seed-data.sql           # Sample financial data
@@ -451,7 +454,56 @@ See also [`scripts/validation/iceberg_time_travel.sql`](../scripts/validation/ic
 
 ---
 
-## 6. Production Considerations
+## 6. Producer API
+
+The **Producer API** is a FastAPI service that exercises both ingestion paths of the data lake:
+
+1. **CDC path** -- INSERTs rows into the PostgreSQL trading database, which Debezium captures and streams through MSK to the Iceberg raw layer.
+2. **Streaming path** -- Produces events directly to MSK Kafka topics (`stream.order-events` and `stream.market-data`), bypassing the database entirely.
+
+The service includes a built-in **trading simulator** that generates correlated order and market data activity, providing a realistic end-to-end data flow for testing and demonstration.
+
+### REST Endpoints
+
+| Method | Path | Description | Ingestion Path |
+|--------|------|-------------|----------------|
+| `POST` | `/api/v1/orders` | Submit a trading order | CDC (PostgreSQL INSERT) + Streaming (Kafka produce to `stream.order-events`) |
+| `POST` | `/api/v1/market-data` | Submit a market data tick | Streaming only (Kafka produce to `stream.market-data`) |
+| `GET` | `/health` | Health check | N/A |
+
+### Manual Testing with curl
+
+```bash
+# Submit an order (triggers CDC + streaming)
+curl -X POST http://localhost:8000/api/v1/orders \
+  -H "Content-Type: application/json" \
+  -d '{"account_id": 1, "instrument_id": 1, "ticker": "AAPL", "side": "BUY", "quantity": 100, "order_type": "MARKET"}'
+
+# Submit market data tick (streaming only)
+curl -X POST http://localhost:8000/api/v1/market-data \
+  -H "Content-Type: application/json" \
+  -d '{"tick_id": "test-001", "instrument_id": 1, "ticker": "AAPL", "bid": 178.40, "ask": 178.60, "last_price": 178.50, "volume": 1000, "timestamp": "2026-02-28T12:00:00Z"}'
+```
+
+### Simulation Mode
+
+The built-in simulator is enabled via the `SIMULATION_ENABLED=true` environment variable. When active, it generates correlated trading cycles every 5 seconds:
+
+- Market data ticks for configured instruments
+- Orders that reference the latest market prices
+- Realistic bid/ask spreads and volume patterns
+
+This provides a continuous stream of data through both the CDC and streaming ingestion paths without manual intervention.
+
+### Viewing Logs
+
+```bash
+kubectl -n data logs -l app=producer-api -f
+```
+
+---
+
+## 7. Production Considerations
 
 The current implementation is sized for development and demonstration. The following changes would be necessary for a production deployment.
 
@@ -522,7 +574,7 @@ The curated layer currently uses manual SQL scripts in [`scripts/01_curated/`](.
 
 ---
 
-## 7. Decision Log
+## 8. Decision Log
 
 ### 1. MSK Provisioned over MSK Serverless
 

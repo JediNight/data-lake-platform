@@ -30,5 +30,6 @@ See [Architecture Design](docs/plans/2026-02-28-data-lake-platform-design.md) fo
 - `terraform/aws/` — AWS infrastructure modules + environments
 - `strimzi/` — Kafka Connect (Debezium CDC + Iceberg sinks)
 - `sample-postgres/` — Source RDBMS for CDC demo
+- `producer-api/` — FastAPI producer service with trading simulator
 - `scripts/` — SQL transforms and validation queries
 - `docs/` — Architecture docs and plans
