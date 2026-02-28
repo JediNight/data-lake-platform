@@ -5,4 +5,5 @@ metadata:
 spec:
   config:
     iceberg.catalog.type: "hadoop"
-    iceberg.catalog.warehouse: "file:///tmp/iceberg/nonmnpi"
+    iceberg.catalog.warehouse: "s3a://datalake-local-iceberg-dev/nonmnpi"
+    iceberg.catalog.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"

@@ -101,3 +101,24 @@ output "cloudtrail_arn" {
   description = "CloudTrail trail ARN"
   value       = module.observability.cloudtrail_arn
 }
+
+# -----------------------------------------------------------------------------
+# EKS (prod only)
+# -----------------------------------------------------------------------------
+output "eks_cluster_endpoint" {
+  description = "EKS cluster API endpoint"
+  value       = local.c.enable_eks ? module.eks[0].cluster_endpoint : null
+}
+
+output "eks_cluster_name" {
+  description = "EKS cluster name"
+  value       = local.c.enable_eks ? module.eks[0].cluster_name : null
+}
+
+# -----------------------------------------------------------------------------
+# Aurora PostgreSQL (prod only)
+# -----------------------------------------------------------------------------
+output "aurora_cluster_endpoint" {
+  description = "Aurora PostgreSQL writer endpoint"
+  value       = local.c.enable_aurora ? module.aurora_postgres[0].cluster_endpoint : null
+}

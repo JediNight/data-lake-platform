@@ -1,0 +1,22 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  name: data-lake-connect
+spec:
+  template:
+    pod:
+      volumes:
+        - name: aws-credentials
+          hostPath:
+            path: /mnt/aws
+            type: Directory
+    connectContainer:
+      volumeMounts:
+        - name: aws-credentials
+          mountPath: /home/kafka/.aws
+          readOnly: true
+      env:
+        - name: AWS_SHARED_CREDENTIALS_FILE
+          value: /home/kafka/.aws/credentials
+        - name: AWS_CONFIG_FILE
+          value: /home/kafka/.aws/config

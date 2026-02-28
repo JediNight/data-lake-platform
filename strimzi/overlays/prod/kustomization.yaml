@@ -17,7 +17,7 @@ patches:
     target:
       kind: KafkaConnector
       name: iceberg-sink-nonmnpi
-  - path: kafka-connect-s3-patch.yaml
+  - path: kafka-connect-patch.yaml
     target:
       kind: KafkaConnect
       name: data-lake-connect

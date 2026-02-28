@@ -10,6 +10,7 @@ spec:
     - list:
         elements:
           - cluster: localdev
+          - cluster: prod
   template:
     metadata:
       name: 'strimzi-connect-{{ .cluster }}'

@@ -1,9 +1,0 @@
-environment                = "prod"
-broker_instance_type       = "kafka.m5.large"
-broker_count               = 3
-default_replication_factor = 3
-enable_quicksight          = true
-audit_retention_days       = 1825          # 5 years per SEC Rule 204-2
-athena_scan_limit_bytes    = 1099511627776 # 1TB
-enable_result_reuse        = true
-raw_ia_transition_days     = 90

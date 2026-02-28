@@ -30,6 +30,12 @@ spec:
         artifacts:
           - type: tgz
             url: https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/2.5.0.Final/debezium-connector-postgres-2.5.0.Final-plugin.tar.gz
+      - name: iceberg-sink
+        artifacts:
+          - type: maven
+            group: io.tabular
+            artifact: iceberg-kafka-connect-runtime
+            version: 0.6.19
   resources:
     requests:
       cpu: 200m

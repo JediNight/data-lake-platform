@@ -3,7 +3,7 @@ version: '3'
 vars:
   CLUSTER_NAME: data-lake
   TF_LOCAL_DIR: terraform/local
-  TF_AWS_DIR: terraform/aws/environments/dev
+  TF_AWS_DIR: terraform/aws
 
 tasks:
   # =========================================================================
@@ -49,29 +49,50 @@ tasks:
     cmds:
       - terraform -chdir={{.TF_LOCAL_DIR}} destroy -auto-approve
 
+  infra:s3:
+    desc: Create S3 bucket for local dev Iceberg data
+    cmds:
+      - terraform -chdir=terraform/aws/modules/local-dev-storage init
+      - terraform -chdir=terraform/aws/modules/local-dev-storage apply -auto-approve
+
+  bootstrap:
+    desc: Full bootstrap (infra + wait for ArgoCD sync + integration tests)
+    cmds:
+      - task: infra
+      - |
+        echo "Waiting for ArgoCD applications to sync..."
+        kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy \
+          applications --all --timeout=300s 2>/dev/null || true
+      - task: status
+      - task: test:integration
+
   # =========================================================================
   # AWS Infrastructure
   # =========================================================================
 
   aws:init:
-    desc: Initialize AWS Terraform modules
+    desc: Initialize AWS Terraform (workspace-based)
     cmds:
       - terraform -chdir={{.TF_AWS_DIR}} init -upgrade
+      - terraform -chdir={{.TF_AWS_DIR}} workspace select {{.TF_WORKSPACE | default "dev"}} 2>/dev/null || terraform -chdir={{.TF_AWS_DIR}} workspace new {{.TF_WORKSPACE | default "dev"}}
 
   aws:plan:
-    desc: Preview AWS infrastructure changes
+    desc: Preview AWS infrastructure changes (TF_WORKSPACE=dev|prod)
     cmds:
-      - terraform -chdir={{.TF_AWS_DIR}} plan
+      - terraform -chdir={{.TF_AWS_DIR}} workspace select {{.TF_WORKSPACE | default "dev"}}
+      - terraform -chdir={{.TF_AWS_DIR}} plan -var-file={{.TF_WORKSPACE | default "dev"}}.tfvars
 
   aws:apply:
-    desc: Apply AWS infrastructure
+    desc: Apply AWS infrastructure (TF_WORKSPACE=dev|prod)
     cmds:
-      - terraform -chdir={{.TF_AWS_DIR}} apply
+      - terraform -chdir={{.TF_AWS_DIR}} workspace select {{.TF_WORKSPACE | default "dev"}}
+      - terraform -chdir={{.TF_AWS_DIR}} apply -var-file={{.TF_WORKSPACE | default "dev"}}.tfvars
 
   aws:destroy:
-    desc: Destroy AWS infrastructure
+    desc: Destroy AWS infrastructure (TF_WORKSPACE=dev|prod)
     cmds:
-      - terraform -chdir={{.TF_AWS_DIR}} destroy
+      - terraform -chdir={{.TF_AWS_DIR}} workspace select {{.TF_WORKSPACE | default "dev"}}
+      - terraform -chdir={{.TF_AWS_DIR}} destroy -var-file={{.TF_WORKSPACE | default "dev"}}.tfvars
 
   # =========================================================================
   # Tilt Dev Loop
@@ -201,15 +222,16 @@ tasks:
       - bash scripts/integration/run-tests.sh
 
   validate:tf:
-    desc: Validate all Terraform environments
+    desc: Validate Terraform configurations
     cmds:
       - |
-        for env in dev prod; do
-          echo "=== Validating $env ==="
-          terraform -chdir=terraform/aws/environments/$env init -backend=false -input=false > /dev/null 2>&1
-          terraform -chdir=terraform/aws/environments/$env validate
-          echo ""
-        done
+        echo "=== Validating AWS (workspace-based) ==="
+        terraform -chdir={{.TF_AWS_DIR}} init -backend=false -input=false > /dev/null 2>&1
+        terraform -chdir={{.TF_AWS_DIR}} validate
+        echo ""
+        echo "=== Validating Local ==="
+        terraform -chdir={{.TF_LOCAL_DIR}} init -backend=false -input=false > /dev/null 2>&1
+        terraform -chdir={{.TF_LOCAL_DIR}} validate
 
   # =========================================================================
   # Cleanup
