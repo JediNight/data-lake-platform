@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: strimzi-connect
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - cluster: localdev
+  template:
+    metadata:
+      name: 'strimzi-connect-{{ .cluster }}'
+    spec:
+      project: default
+      source:
+        repoURL: file:///mnt/data-lake-platform
+        targetRevision: HEAD
+        path: 'strimzi/overlays/{{ .cluster }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: strimzi
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
