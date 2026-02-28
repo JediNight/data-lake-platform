@@ -14,7 +14,27 @@ print("""
 
 watch_file('strimzi/')
 watch_file('sample-postgres/')
+watch_file('producer-api/')
 watch_file('appset-management.yaml')
+
+# ==========================================================================
+# Build Resources
+# ==========================================================================
+
+local_resource(
+    'producer-api-build',
+    cmd='TAG=localdev-$(date +%s) && ' +
+        'docker build -t producer-api:$TAG producer-api/ && ' +
+        'kind load docker-image producer-api:$TAG --name data-lake && ' +
+        'cd producer-api/overlays/localdev && ' +
+        'kustomize edit set image producer-api=producer-api:$TAG',
+    deps=[
+        'producer-api/app/',
+        'producer-api/Dockerfile',
+    ],
+    labels=['build'],
+    trigger_mode=TRIGGER_MODE_MANUAL,
+)
 
 # ==========================================================================
 # Utility Resources
@@ -49,6 +69,14 @@ local_resource(
     'kafka-connect-status',
     cmd='kubectl -n strimzi get kafkaconnects,kafkaconnectors 2>/dev/null || echo "No Kafka Connect resources"',
     labels=['kafka'],
+    auto_init=False,
+    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+local_resource(
+    'producer-api-logs',
+    cmd='kubectl -n data logs -l app=producer-api --tail=50 2>/dev/null || echo "No producer-api pods"',
+    labels=['info'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
