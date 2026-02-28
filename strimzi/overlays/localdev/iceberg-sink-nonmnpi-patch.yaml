@@ -1,0 +1,8 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: iceberg-sink-nonmnpi
+spec:
+  config:
+    iceberg.catalog.type: "hadoop"
+    iceberg.catalog.warehouse: "file:///tmp/iceberg/nonmnpi"

@@ -9,3 +9,11 @@ patches:
     target:
       kind: KafkaConnector
       name: debezium-postgres-source
+  - path: iceberg-sink-mnpi-patch.yaml
+    target:
+      kind: KafkaConnector
+      name: iceberg-sink-mnpi
+  - path: iceberg-sink-nonmnpi-patch.yaml
+    target:
+      kind: KafkaConnector
+      name: iceberg-sink-nonmnpi
