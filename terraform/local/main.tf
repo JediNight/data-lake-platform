@@ -27,7 +27,8 @@ resource "kind_cluster" "this" {
     }
 
     node {
-      role = "control-plane"
+      role  = "control-plane"
+      image = var.kind_node_image
 
       labels = {
         "ingress-ready" = "true"
@@ -47,7 +48,8 @@ resource "kind_cluster" "this" {
     }
 
     node {
-      role = "worker"
+      role  = "worker"
+      image = var.kind_node_image
 
       labels = {
         "workload" = "applications"

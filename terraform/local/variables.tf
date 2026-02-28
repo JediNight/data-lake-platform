@@ -22,6 +22,12 @@ variable "argocd_namespace" {
   default     = "argocd"
 }
 
+variable "kind_node_image" {
+  description = "Kind node image (pins Kubernetes version). Strimzi 0.44 requires K8s <=1.31."
+  type        = string
+  default     = "kindest/node:v1.31.2"
+}
+
 variable "project_path" {
   description = "Absolute path to data-lake-platform directory (mounted into Kind nodes)"
   type        = string
