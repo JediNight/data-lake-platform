@@ -3,6 +3,12 @@ kind: KafkaConnect
 metadata:
   name: data-lake-connect
 spec:
+  bootstrapServers: data-lake-kafka-kafka-bootstrap:9092
+  build:
+    output:
+      type: docker
+      image: docker.io/tfawibe/data-lake-connect:latest
+      pushSecret: docker-hub-creds
   template:
     pod:
       volumes:
