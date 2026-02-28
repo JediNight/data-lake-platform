@@ -2,7 +2,7 @@
  * lake-formation -- Variables
  *
  * Inputs for LF-Tags, tag-based grants, S3 location registrations,
- * Lake Formation admin settings, and Identity Center configuration.
+ * and Lake Formation admin settings.
  */
 
 variable "environment" {
@@ -37,11 +37,6 @@ variable "data_analysts_group_id" {
 
 variable "data_engineers_group_id" {
   description = "Identity Center group ID for data engineers"
-  type        = string
-}
-
-variable "sso_instance_arn" {
-  description = "SSO instance ARN for Lake Formation IC configuration"
   type        = string
 }
 

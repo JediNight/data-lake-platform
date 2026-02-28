@@ -87,14 +87,15 @@ resource "aws_lakeformation_data_lake_settings" "this" {
 # =============================================================================
 # Identity Center Configuration
 # =============================================================================
-# Connect Lake Formation to IAM Identity Center for trusted identity
-# propagation. This enables granting permissions directly to IC groups
-# instead of IAM role ARNs.
+# NOTE: The aws_lakeformation_identity_center_configuration resource requires
+# the AWS provider >= 6.19.  This project currently uses ~> 5.0.  To enable
+# trusted identity propagation (TIP) between Lake Formation and Identity
+# Center, run the following AWS CLI command after the initial apply:
+#
+#   aws lakeformation create-lake-formation-identity-center-configuration
+#
+# Once the provider is upgraded to v6.x this can be managed in Terraform.
 # =============================================================================
-
-resource "aws_lakeformation_identity_center_configuration" "this" {
-  instance_arn = var.sso_instance_arn
-}
 
 # =============================================================================
 # LF-Tags (2 tag keys)
@@ -195,7 +196,6 @@ resource "aws_lakeformation_permissions" "finance_analyst_db" {
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
-    aws_lakeformation_identity_center_configuration.this,
   ]
 }
 
@@ -221,7 +221,6 @@ resource "aws_lakeformation_permissions" "finance_analyst_table" {
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
-    aws_lakeformation_identity_center_configuration.this,
   ]
 }
 
@@ -249,7 +248,6 @@ resource "aws_lakeformation_permissions" "data_analyst_db" {
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
-    aws_lakeformation_identity_center_configuration.this,
   ]
 }
 
@@ -275,7 +273,6 @@ resource "aws_lakeformation_permissions" "data_analyst_table" {
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
-    aws_lakeformation_identity_center_configuration.this,
   ]
 }
 
@@ -303,7 +300,6 @@ resource "aws_lakeformation_permissions" "data_engineer_db" {
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
-    aws_lakeformation_identity_center_configuration.this,
   ]
 }
 
@@ -329,7 +325,6 @@ resource "aws_lakeformation_permissions" "data_engineer_table" {
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
-    aws_lakeformation_identity_center_configuration.this,
   ]
 }
 
@@ -345,7 +340,6 @@ resource "aws_lakeformation_permissions" "data_engineer_location_mnpi" {
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
-    aws_lakeformation_identity_center_configuration.this,
   ]
 }
 
@@ -361,6 +355,5 @@ resource "aws_lakeformation_permissions" "data_engineer_location_nonmnpi" {
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
-    aws_lakeformation_identity_center_configuration.this,
   ]
 }

@@ -61,26 +61,29 @@ output "glue_registry_arn" {
 }
 
 # -----------------------------------------------------------------------------
-# IAM Personas — Role ARNs
+# Identity Center — Group IDs
 # -----------------------------------------------------------------------------
-output "finance_analyst_role_arn" {
-  description = "Finance analyst IAM role ARN"
-  value       = module.iam_personas.finance_analyst_role_arn
+output "finance_analysts_group_id" {
+  description = "Finance analysts Identity Center group ID"
+  value       = module.identity_center.finance_analysts_group_id
 }
 
-output "data_analyst_role_arn" {
-  description = "Data analyst IAM role ARN"
-  value       = module.iam_personas.data_analyst_role_arn
+output "data_analysts_group_id" {
+  description = "Data analysts Identity Center group ID"
+  value       = module.identity_center.data_analysts_group_id
 }
 
-output "data_engineer_role_arn" {
-  description = "Data engineer IAM role ARN"
-  value       = module.iam_personas.data_engineer_role_arn
+output "data_engineers_group_id" {
+  description = "Data engineers Identity Center group ID"
+  value       = module.identity_center.data_engineers_group_id
 }
 
+# -----------------------------------------------------------------------------
+# Service Roles
+# -----------------------------------------------------------------------------
 output "kafka_connect_role_arn" {
   description = "Kafka Connect IRSA role ARN"
-  value       = module.iam_personas.kafka_connect_role_arn
+  value       = module.service_roles.kafka_connect_role_arn
 }
 
 # -----------------------------------------------------------------------------
