@@ -179,6 +179,22 @@ tasks:
         source .venv/bin/activate 2>/dev/null || true
         pytest tests/ -v --tb=short
 
+  alpaca:start:
+    desc: Start Alpaca market data adapter (requires ALPACA_API_KEY, ALPACA_SECRET_KEY)
+    dir: producer-api
+    cmds:
+      - |
+        source .venv/bin/activate 2>/dev/null || true
+        python -m alpaca_adapter
+
+  alpaca:test:
+    desc: Run Alpaca transform tests (no API key needed)
+    dir: producer-api
+    cmds:
+      - |
+        source .venv/bin/activate 2>/dev/null || true
+        pytest tests/test_alpaca_transforms.py -v
+
   validate:tf:
     desc: Validate all Terraform environments
     cmds:
