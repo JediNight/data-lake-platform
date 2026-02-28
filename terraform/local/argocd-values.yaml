@@ -1,0 +1,95 @@
+# ArgoCD values for data-lake-platform local dev
+# Mirrors iac-local/terraform/argocd-values.yaml
+
+global:
+  logging:
+    level: warn
+
+configs:
+  params:
+    server.insecure: true
+    application.namespaces: "*"
+    applicationsetcontroller.namespaces: "*"
+  cm:
+    timeout.reconciliation: 5s
+    kustomize.buildOptions: "--enable-alpha-plugins --enable-exec"
+
+server:
+  service:
+    type: NodePort
+    nodePortHttp: 30080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+controller:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+repoServer:
+  volumes:
+    - name: sops-age-key
+      secret:
+        secretName: sops-age-key
+    - name: custom-tools
+      emptyDir: {}
+  initContainers:
+    - name: install-ksops
+      image: viaductoss/ksops:v4.3.2
+      command: ["/bin/sh", "-c"]
+      args:
+        - echo "Installing KSOPS...";
+          mv /usr/local/bin/ksops /custom-tools/ksops;
+          mv /usr/local/bin/kustomize /custom-tools/kustomize;
+          echo "KSOPS installed successfully"
+      volumeMounts:
+        - mountPath: /custom-tools
+          name: custom-tools
+  volumeMounts:
+    - mountPath: /usr/local/bin/ksops
+      name: custom-tools
+      subPath: ksops
+    - mountPath: /usr/local/bin/kustomize
+      name: custom-tools
+      subPath: kustomize
+    - mountPath: /home/argocd/.config/sops/age
+      name: sops-age-key
+  env:
+    - name: SOPS_AGE_KEY_FILE
+      value: /home/argocd/.config/sops/age/keys.txt
+    - name: XDG_CONFIG_HOME
+      value: /home/argocd/.config
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+redis:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+applicationSet:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
