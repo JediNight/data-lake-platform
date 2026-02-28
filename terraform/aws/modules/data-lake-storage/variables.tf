@@ -15,7 +15,7 @@ variable "environment" {
 }
 
 variable "allowed_principal_arns" {
-  description = "IAM role ARNs allowed direct S3 access (bypassing Lake Formation deny)"
+  description = "IAM role ARNs or ArnLike patterns allowed direct S3 access (bypassing Lake Formation deny). Supports wildcards for SSO-generated roles."
   type        = list(string)
 
   validation {
