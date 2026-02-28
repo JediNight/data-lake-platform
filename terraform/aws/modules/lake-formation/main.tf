@@ -9,6 +9,9 @@
  *   - Data analysts:    SELECT on curated + analytics layers, non-MNPI only
  *   - Data engineers:   ALL on every layer and sensitivity, plus direct S3
  *
+ * Grant principals are IAM Identity Center groups (via trusted identity
+ * propagation) rather than IAM role ARNs.
+ *
  * When new tables are added to a database they automatically inherit the
  * database's LF-Tags, so grants apply without any Terraform changes.
  */
@@ -79,6 +82,18 @@ resource "aws_lakeformation_data_lake_settings" "this" {
   # create_table_default_permissions removes the default
   # IAMAllowedPrincipals grants, forcing all access through
   # Lake Formation grants rather than plain IAM.
+}
+
+# =============================================================================
+# Identity Center Configuration
+# =============================================================================
+# Connect Lake Formation to IAM Identity Center for trusted identity
+# propagation. This enables granting permissions directly to IC groups
+# instead of IAM role ARNs.
+# =============================================================================
+
+resource "aws_lakeformation_identity_center_configuration" "this" {
+  instance_arn = var.sso_instance_arn
 }
 
 # =============================================================================
@@ -161,7 +176,7 @@ resource "aws_lakeformation_resource" "nonmnpi_bucket" {
 # -----------------------------------------------------------------------------
 
 resource "aws_lakeformation_permissions" "finance_analyst_db" {
-  principal   = var.finance_analyst_role_arn
+  principal   = "arn:aws:identitystore:::group/${var.finance_analysts_group_id}"
   permissions = ["DESCRIBE"]
 
   lf_tag_policy {
@@ -178,13 +193,16 @@ resource "aws_lakeformation_permissions" "finance_analyst_db" {
     }
   }
 
-  depends_on = [aws_lakeformation_data_lake_settings.this]
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
 }
 
 # Finance Analyst -- TABLE-level grant (SELECT)
 
 resource "aws_lakeformation_permissions" "finance_analyst_table" {
-  principal   = var.finance_analyst_role_arn
+  principal   = "arn:aws:identitystore:::group/${var.finance_analysts_group_id}"
   permissions = ["SELECT", "DESCRIBE"]
 
   lf_tag_policy {
@@ -201,7 +219,10 @@ resource "aws_lakeformation_permissions" "finance_analyst_table" {
     }
   }
 
-  depends_on = [aws_lakeformation_data_lake_settings.this]
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
 }
 
 # -----------------------------------------------------------------------------
@@ -209,7 +230,7 @@ resource "aws_lakeformation_permissions" "finance_analyst_table" {
 # -----------------------------------------------------------------------------
 
 resource "aws_lakeformation_permissions" "data_analyst_db" {
-  principal   = var.data_analyst_role_arn
+  principal   = "arn:aws:identitystore:::group/${var.data_analysts_group_id}"
   permissions = ["DESCRIBE"]
 
   lf_tag_policy {
@@ -226,13 +247,16 @@ resource "aws_lakeformation_permissions" "data_analyst_db" {
     }
   }
 
-  depends_on = [aws_lakeformation_data_lake_settings.this]
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
 }
 
 # Data Analyst -- TABLE-level grant (SELECT)
 
 resource "aws_lakeformation_permissions" "data_analyst_table" {
-  principal   = var.data_analyst_role_arn
+  principal   = "arn:aws:identitystore:::group/${var.data_analysts_group_id}"
   permissions = ["SELECT", "DESCRIBE"]
 
   lf_tag_policy {
@@ -249,7 +273,10 @@ resource "aws_lakeformation_permissions" "data_analyst_table" {
     }
   }
 
-  depends_on = [aws_lakeformation_data_lake_settings.this]
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
 }
 
 # -----------------------------------------------------------------------------
@@ -257,7 +284,7 @@ resource "aws_lakeformation_permissions" "data_analyst_table" {
 # -----------------------------------------------------------------------------
 
 resource "aws_lakeformation_permissions" "data_engineer_db" {
-  principal   = var.data_engineer_role_arn
+  principal   = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
   permissions = ["ALL"]
 
   lf_tag_policy {
@@ -274,13 +301,16 @@ resource "aws_lakeformation_permissions" "data_engineer_db" {
     }
   }
 
-  depends_on = [aws_lakeformation_data_lake_settings.this]
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
 }
 
 # Data Engineer -- TABLE-level grant (ALL)
 
 resource "aws_lakeformation_permissions" "data_engineer_table" {
-  principal   = var.data_engineer_role_arn
+  principal   = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
   permissions = ["ALL"]
 
   lf_tag_policy {
@@ -297,31 +327,40 @@ resource "aws_lakeformation_permissions" "data_engineer_table" {
     }
   }
 
-  depends_on = [aws_lakeformation_data_lake_settings.this]
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
 }
 
 # Data Engineer -- DATA_LOCATION_ACCESS on MNPI bucket
 
 resource "aws_lakeformation_permissions" "data_engineer_location_mnpi" {
-  principal   = var.data_engineer_role_arn
+  principal   = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
   permissions = ["DATA_LOCATION_ACCESS"]
 
   data_location {
     arn = aws_lakeformation_resource.mnpi_bucket.arn
   }
 
-  depends_on = [aws_lakeformation_data_lake_settings.this]
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
 }
 
 # Data Engineer -- DATA_LOCATION_ACCESS on non-MNPI bucket
 
 resource "aws_lakeformation_permissions" "data_engineer_location_nonmnpi" {
-  principal   = var.data_engineer_role_arn
+  principal   = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
   permissions = ["DATA_LOCATION_ACCESS"]
 
   data_location {
     arn = aws_lakeformation_resource.nonmnpi_bucket.arn
   }
 
-  depends_on = [aws_lakeformation_data_lake_settings.this]
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
 }

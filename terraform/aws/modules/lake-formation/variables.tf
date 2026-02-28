@@ -2,7 +2,7 @@
  * lake-formation -- Variables
  *
  * Inputs for LF-Tags, tag-based grants, S3 location registrations,
- * and Lake Formation admin settings.
+ * Lake Formation admin settings, and Identity Center configuration.
  */
 
 variable "environment" {
@@ -25,18 +25,23 @@ variable "nonmnpi_bucket_arn" {
   type        = string
 }
 
-variable "finance_analyst_role_arn" {
-  description = "ARN of the finance analyst IAM role"
+variable "finance_analysts_group_id" {
+  description = "Identity Center group ID for finance analysts"
   type        = string
 }
 
-variable "data_analyst_role_arn" {
-  description = "ARN of the data analyst IAM role"
+variable "data_analysts_group_id" {
+  description = "Identity Center group ID for data analysts"
   type        = string
 }
 
-variable "data_engineer_role_arn" {
-  description = "ARN of the data engineer IAM role"
+variable "data_engineers_group_id" {
+  description = "Identity Center group ID for data engineers"
+  type        = string
+}
+
+variable "sso_instance_arn" {
+  description = "SSO instance ARN for Lake Formation IC configuration"
   type        = string
 }
 
