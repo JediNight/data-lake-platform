@@ -26,6 +26,14 @@ spec:
           parameters:
             - name: watchAnyNamespace
               value: "true"
+            - name: resources.requests.memory
+              value: "512Mi"
+            - name: resources.limits.memory
+              value: "512Mi"
+            - name: livenessProbe.initialDelaySeconds
+              value: "30"
+            - name: readinessProbe.initialDelaySeconds
+              value: "30"
       destination:
         server: https://kubernetes.default.svc
         namespace: strimzi
