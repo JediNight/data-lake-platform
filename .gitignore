@@ -21,5 +21,13 @@ keys.txt
 **/TRASH/
 **/TRASH-FILES.md
 
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
 # Tilt
 tilt_modules/

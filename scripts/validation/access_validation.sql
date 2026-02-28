@@ -1,7 +1,7 @@
 -- Access Validation Queries
 -- Run each query as the respective persona to demonstrate LF-Tag enforcement
 --
--- Personas (defined in terraform/aws/modules/iam-personas):
+-- Personas (defined in terraform/aws/modules/identity-center):
 --   Finance Analyst : Can query curated_mnpi.*, curated_nonmnpi.*, and analytics_*
 --   Data Analyst    : Can query curated_nonmnpi.* and analytics_nonmnpi.* ONLY
 --   Data Engineer   : Can query ALL databases including raw_*
