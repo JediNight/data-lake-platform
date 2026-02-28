@@ -33,8 +33,8 @@ module "data_lake_storage" {
   source      = "../../modules/data-lake-storage"
   environment = var.environment
   allowed_principal_arns = [
-    module.iam_personas.data_engineer_role_arn,
-    module.iam_personas.kafka_connect_role_arn,
+    module.identity_center.data_engineer_sso_role_pattern,
+    module.service_roles.kafka_connect_role_arn,
   ]
   raw_ia_transition_days = var.raw_ia_transition_days
 }
@@ -56,29 +56,35 @@ module "glue_catalog" {
   nonmnpi_bucket_id = module.data_lake_storage.nonmnpi_bucket_id
 }
 
-module "iam_personas" {
-  source                   = "../../modules/iam-personas"
+module "identity_center" {
+  source                   = "../../modules/identity-center"
   environment              = var.environment
-  account_id               = data.aws_caller_identity.current.account_id
   mnpi_bucket_arn          = module.data_lake_storage.mnpi_bucket_arn
   nonmnpi_bucket_arn       = module.data_lake_storage.nonmnpi_bucket_arn
   query_results_bucket_arn = module.data_lake_storage.query_results_bucket_arn
-  glue_registry_arn        = module.glue_catalog.registry_arn
-  msk_cluster_arn          = module.streaming.cluster_arn
-  eks_oidc_provider_arn    = var.eks_oidc_provider_arn
-  eks_oidc_provider_url    = var.eks_oidc_provider_url
+}
+
+module "service_roles" {
+  source                = "../../modules/service-roles"
+  environment           = var.environment
+  mnpi_bucket_arn       = module.data_lake_storage.mnpi_bucket_arn
+  nonmnpi_bucket_arn    = module.data_lake_storage.nonmnpi_bucket_arn
+  glue_registry_arn     = module.glue_catalog.registry_arn
+  msk_cluster_arn       = module.streaming.cluster_arn
+  eks_oidc_provider_arn = var.eks_oidc_provider_arn
+  eks_oidc_provider_url = var.eks_oidc_provider_url
 }
 
 module "lake_formation" {
-  source                   = "../../modules/lake-formation"
-  environment              = var.environment
-  database_names           = module.glue_catalog.database_names
-  mnpi_bucket_arn          = module.data_lake_storage.mnpi_bucket_arn
-  nonmnpi_bucket_arn       = module.data_lake_storage.nonmnpi_bucket_arn
-  finance_analyst_role_arn = module.iam_personas.finance_analyst_role_arn
-  data_analyst_role_arn    = module.iam_personas.data_analyst_role_arn
-  data_engineer_role_arn   = module.iam_personas.data_engineer_role_arn
-  admin_role_arn           = var.admin_role_arn
+  source                    = "../../modules/lake-formation"
+  environment               = var.environment
+  database_names            = module.glue_catalog.database_names
+  mnpi_bucket_arn           = module.data_lake_storage.mnpi_bucket_arn
+  nonmnpi_bucket_arn        = module.data_lake_storage.nonmnpi_bucket_arn
+  finance_analysts_group_id = module.identity_center.finance_analysts_group_id
+  data_analysts_group_id    = module.identity_center.data_analysts_group_id
+  data_engineers_group_id   = module.identity_center.data_engineers_group_id
+  admin_role_arn            = var.admin_role_arn
 }
 
 module "analytics" {
