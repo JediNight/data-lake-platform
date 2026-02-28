@@ -7,9 +7,10 @@ spec:
     spec:
       containers:
         - name: producer-api
+          imagePullPolicy: Never
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
-              value: "data-lake-cluster-kafka-bootstrap.strimzi.svc.cluster.local:9092"
+              value: "data-lake-kafka-kafka-bootstrap.strimzi.svc.cluster.local:9092"
             - name: POSTGRES_DSN
               value: "postgresql://postgres:postgres@sample-postgres.data.svc.cluster.local:5432/trading"
             - name: SIMULATION_ENABLED
