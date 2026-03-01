@@ -34,9 +34,9 @@ spec:
       - name: iceberg-sink
         artifacts:
           - type: maven
-            group: io.tabular
-            artifact: iceberg-kafka-connect-runtime
-            version: 0.6.19
+            group: org.apache.iceberg
+            artifact: iceberg-kafka-connect
+            version: 1.8.1
   resources:
     requests:
       cpu: 200m
