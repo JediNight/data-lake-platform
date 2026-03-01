@@ -128,11 +128,13 @@ resource "aws_glue_workflow" "medallion" {
 # Triggers
 # =============================================================================
 
-# Start trigger — fires both curated jobs in parallel (ON_DEMAND)
+# Start trigger — fires both curated jobs in parallel (SCHEDULED in prod, ON_DEMAND in dev)
 resource "aws_glue_trigger" "start_curated" {
   name          = "datalake-start-curated-${var.environment}"
-  type          = "ON_DEMAND"
+  type          = var.schedule_expression != "" ? "SCHEDULED" : "ON_DEMAND"
   workflow_name = aws_glue_workflow.medallion.name
+  schedule      = var.schedule_expression != "" ? var.schedule_expression : null
+  start_on_creation = var.schedule_expression != "" ? true : null
 
   actions {
     job_name = aws_glue_job.this["curated_order_events"].name

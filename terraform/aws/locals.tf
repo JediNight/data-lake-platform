@@ -42,6 +42,7 @@ locals {
       # Glue ETL
       enable_glue_etl  = true
       glue_worker_count = 2
+      glue_schedule     = "" # ON_DEMAND for dev
     }
 
     prod = {
@@ -80,6 +81,7 @@ locals {
       # Glue ETL
       enable_glue_etl   = true
       glue_worker_count = 5
+      glue_schedule     = "cron(0 */6 * * ? *)" # Every 6 hours
     }
   }
 

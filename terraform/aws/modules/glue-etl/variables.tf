@@ -31,6 +31,12 @@ variable "worker_count" {
   default     = 2
 }
 
+variable "schedule_expression" {
+  description = "Cron expression for the start trigger (empty string = ON_DEMAND)"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Common tags for all resources"
   type        = map(string)

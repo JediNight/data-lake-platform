@@ -182,11 +182,12 @@ module "glue_etl" {
   source = "./modules/glue-etl"
   count  = local.c.enable_glue_etl ? 1 : 0
 
-  environment       = local.env
-  glue_role_arn     = module.service_roles.glue_etl_role_arn
-  scripts_bucket_id = module.data_lake_storage.query_results_bucket_id
-  worker_count      = local.c.glue_worker_count
-  tags              = {}
+  environment         = local.env
+  glue_role_arn       = module.service_roles.glue_etl_role_arn
+  scripts_bucket_id   = module.data_lake_storage.query_results_bucket_id
+  worker_count        = local.c.glue_worker_count
+  schedule_expression = local.c.glue_schedule
+  tags                = {}
 }
 
 # =============================================================================
