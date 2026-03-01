@@ -9,18 +9,10 @@
  */
 
 # =============================================================================
-# Custom Plugins (uploaded JARs)
+# Custom Plugins
+# Plugin JARs/ZIPs are uploaded out-of-band via scripts/upload-connector-plugins.sh.
+# We only manage the S3 bucket and MSK Connect plugin resources here.
 # =============================================================================
-
-resource "aws_s3_object" "debezium_plugin" {
-  bucket = aws_s3_bucket.plugins.id
-  key    = "debezium-postgres/debezium-connector-postgres-${var.debezium_version}-plugin.tar.gz"
-  source = "/dev/null" # Placeholder — actual JAR uploaded out of band or via CI
-
-  lifecycle {
-    ignore_changes = [source, etag]
-  }
-}
 
 data "aws_caller_identity" "current" {}
 
@@ -36,29 +28,19 @@ resource "aws_mskconnect_custom_plugin" "debezium" {
   location {
     s3 {
       bucket_arn = aws_s3_bucket.plugins.arn
-      file_key   = aws_s3_object.debezium_plugin.key
+      file_key   = "debezium-postgres/debezium-connector-postgres-${var.debezium_version}-plugin.tar.gz"
     }
-  }
-}
-
-resource "aws_s3_object" "iceberg_plugin" {
-  bucket = aws_s3_bucket.plugins.id
-  key    = "iceberg-sink/iceberg-kafka-connect-runtime-${var.iceberg_connector_version}.jar"
-  source = "/dev/null" # Placeholder — actual JAR uploaded out of band or via CI
-
-  lifecycle {
-    ignore_changes = [source, etag]
   }
 }
 
 resource "aws_mskconnect_custom_plugin" "iceberg_sink" {
   name         = "iceberg-sink-${var.environment}"
-  content_type = "JAR"
+  content_type = "ZIP"
 
   location {
     s3 {
       bucket_arn = aws_s3_bucket.plugins.arn
-      file_key   = aws_s3_object.iceberg_plugin.key
+      file_key   = "iceberg-sink/iceberg-kafka-connect-runtime-${var.iceberg_connector_version}.zip"
     }
   }
 }
@@ -84,7 +66,7 @@ resource "aws_mskconnect_worker_configuration" "this" {
 resource "aws_mskconnect_connector" "debezium_source" {
   name = "debezium-source-${var.environment}"
 
-  kafkaconnect_version = "3.7.1"
+  kafkaconnect_version = "3.7.x"
 
   capacity {
     provisioned_capacity {
@@ -160,7 +142,7 @@ resource "aws_mskconnect_connector" "debezium_source" {
 resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
   name = "iceberg-sink-mnpi-${var.environment}"
 
-  kafkaconnect_version = "3.7.1"
+  kafkaconnect_version = "3.7.x"
 
   capacity {
     provisioned_capacity {
@@ -231,7 +213,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
 resource "aws_mskconnect_connector" "iceberg_sink_nonmnpi" {
   name = "iceberg-sink-nonmnpi-${var.environment}"
 
-  kafkaconnect_version = "3.7.1"
+  kafkaconnect_version = "3.7.x"
 
   capacity {
     provisioned_capacity {
