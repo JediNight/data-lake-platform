@@ -58,7 +58,7 @@ resource "random_password" "master" {
 
 resource "aws_secretsmanager_secret" "master_password" {
   name                    = "datalake/aurora/${var.environment}/master-password"
-  recovery_window_in_days = 0 # Allow immediate deletion for dev
+  recovery_window_in_days = var.environment == "prod" ? 7 : 0
 }
 
 resource "aws_secretsmanager_secret_version" "master_password" {
