@@ -18,10 +18,10 @@ spec:
     connectContainer:
       volumeMounts:
         - name: aws-credentials
-          mountPath: /home/kafka/.aws
+          mountPath: /mnt/aws
           readOnly: true
       env:
         - name: AWS_SHARED_CREDENTIALS_FILE
-          value: /home/kafka/.aws/credentials
+          value: /mnt/aws/credentials
         - name: AWS_CONFIG_FILE
-          value: /home/kafka/.aws/config
+          value: /mnt/aws/config
