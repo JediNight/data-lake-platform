@@ -4,7 +4,7 @@ metadata:
   name: data-lake-connect
 spec:
   bootstrapServers: data-lake-kafka-kafka-bootstrap:9092
-  image: index.docker.io/tfawibe/data-lake-connect@sha256:37de0c857ae791804e13853632bf7b088b8214afaae6aaf5bb24ef7eacbd5ef0
+  image: data-lake-connect:with-aws
   template:
     pod:
       volumes:

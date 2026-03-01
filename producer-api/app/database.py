@@ -130,11 +130,11 @@ class TradingDatabase:
             INSERT INTO positions (
                 account_id, instrument_id, quantity, market_value, position_date
             )
-            VALUES ($1, $2, $3, $3 * $4, CURRENT_DATE)
+            VALUES ($1, $2, $3, $3::numeric * $4::numeric, CURRENT_DATE)
             ON CONFLICT (account_id, instrument_id, position_date)
             DO UPDATE SET
-                quantity      = positions.quantity + $3,
-                market_value  = (positions.quantity + $3) * $4,
+                quantity      = positions.quantity + $3::numeric,
+                market_value  = (positions.quantity + $3::numeric) * $4::numeric,
                 updated_at    = NOW()
             """,
             account_id,
