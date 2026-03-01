@@ -8,7 +8,7 @@ metadata:
 spec:
   version: 3.8.0
   replicas: 1
-  bootstrapServers: data-lake-kafka-bootstrap:9092
+  bootstrapServers: data-lake-kafka-kafka-bootstrap:9092
   config:
     group.id: data-lake-connect
     offset.storage.topic: connect-offsets

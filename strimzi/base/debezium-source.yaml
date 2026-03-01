@@ -27,8 +27,14 @@ spec:
     snapshot.mode: initial
 
     # Schema history
-    schema.history.internal.kafka.bootstrap.servers: data-lake-kafka-bootstrap:9092
+    schema.history.internal.kafka.bootstrap.servers: data-lake-kafka-kafka-bootstrap:9092
     schema.history.internal.kafka.topic: debezium-schema-history
 
     # Tables to capture (all 5)
     table.include.list: "public.orders,public.trades,public.positions,public.accounts,public.instruments"
+
+    # Strip schema name from topic: cdc.trading.public.orders -> cdc.trading.orders
+    transforms: dropSchemaFromTopic
+    transforms.dropSchemaFromTopic.type: org.apache.kafka.connect.transforms.RegexRouter
+    transforms.dropSchemaFromTopic.regex: "(.+)\\.public\\.(.*)"
+    transforms.dropSchemaFromTopic.replacement: "$1.$2"
