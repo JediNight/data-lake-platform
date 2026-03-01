@@ -85,7 +85,7 @@ resource "aws_rds_cluster" "this" {
   # Enable logical replication for Debezium CDC
   db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.this.name
 
-  storage_encrypted = true
+  storage_encrypted   = true
   skip_final_snapshot = true
   deletion_protection = var.environment == "prod" ? true : false
 

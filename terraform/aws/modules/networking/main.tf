@@ -378,12 +378,12 @@ resource "aws_vpc_security_group_egress_rule" "lambda_to_msk" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "lambda_to_aurora" {
-  security_group_id            = aws_security_group.lambda.id
-  description                  = "PostgreSQL (5432) to Aurora"
-  from_port                    = 5432
-  to_port                      = 5432
-  ip_protocol                  = "tcp"
-  cidr_ipv4                    = var.vpc_cidr
+  security_group_id = aws_security_group.lambda.id
+  description       = "PostgreSQL (5432) to Aurora"
+  from_port         = 5432
+  to_port           = 5432
+  ip_protocol       = "tcp"
+  cidr_ipv4         = var.vpc_cidr
 
   tags = merge(local.common_tags, { Name = "lambda-egress-to-aurora" })
 }

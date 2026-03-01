@@ -94,13 +94,13 @@ resource "aws_glue_job" "this" {
   }
 
   default_arguments = {
-    "--datalake-formats"                    = "iceberg"
-    "--environment"                         = var.environment
-    "--enable-continuous-cloudwatch-log"     = "true"
-    "--enable-metrics"                      = "true"
-    "--job-language"                        = "python"
-    "--TempDir"                             = "s3://${var.scripts_bucket_id}/glue-temp/"
-    "--iceberg-warehouse"                   = "s3://${var.scripts_bucket_id}/iceberg-warehouse/"
+    "--datalake-formats"                 = "iceberg"
+    "--environment"                      = var.environment
+    "--enable-continuous-cloudwatch-log" = "true"
+    "--enable-metrics"                   = "true"
+    "--job-language"                     = "python"
+    "--TempDir"                          = "s3://${var.scripts_bucket_id}/glue-temp/"
+    "--iceberg-warehouse"                = "s3://${var.scripts_bucket_id}/iceberg-warehouse/"
   }
 
   tags = merge(local.common_tags, {
@@ -130,10 +130,10 @@ resource "aws_glue_workflow" "medallion" {
 
 # Start trigger — fires both curated jobs in parallel (SCHEDULED in prod, ON_DEMAND in dev)
 resource "aws_glue_trigger" "start_curated" {
-  name          = "datalake-start-curated-${var.environment}"
-  type          = var.schedule_expression != "" ? "SCHEDULED" : "ON_DEMAND"
-  workflow_name = aws_glue_workflow.medallion.name
-  schedule      = var.schedule_expression != "" ? var.schedule_expression : null
+  name              = "datalake-start-curated-${var.environment}"
+  type              = var.schedule_expression != "" ? "SCHEDULED" : "ON_DEMAND"
+  workflow_name     = aws_glue_workflow.medallion.name
+  schedule          = var.schedule_expression != "" ? var.schedule_expression : null
   start_on_creation = var.schedule_expression != "" ? true : null
 
   actions {

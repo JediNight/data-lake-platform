@@ -94,21 +94,21 @@ resource "aws_mskconnect_connector" "debezium_source" {
   }
 
   connector_configuration = {
-    "connector.class"                    = "io.debezium.connector.postgresql.PostgresConnector"
-    "database.hostname"                  = var.postgres_endpoint
-    "database.port"                      = tostring(var.postgres_port)
-    "database.user"                      = "postgres"
-    "database.dbname"                    = "trading"
-    "topic.prefix"                       = "cdc.trading"
-    "plugin.name"                        = "pgoutput"
-    "publication.name"                   = "debezium_publication"
-    "slot.name"                          = "debezium_slot"
-    "table.include.list"                 = "public.orders,public.trades,public.positions,public.accounts,public.instruments"
-    "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
-    "value.converter"                    = "org.apache.kafka.connect.json.JsonConverter"
-    "key.converter.schemas.enable"       = "false"
-    "value.converter.schemas.enable"     = "true"
-    "database.password"                  = "$${secretManager:datalake/aurora/${var.environment}/master-password}"
+    "connector.class"                = "io.debezium.connector.postgresql.PostgresConnector"
+    "database.hostname"              = var.postgres_endpoint
+    "database.port"                  = tostring(var.postgres_port)
+    "database.user"                  = "postgres"
+    "database.dbname"                = "trading"
+    "topic.prefix"                   = "cdc.trading"
+    "plugin.name"                    = "pgoutput"
+    "publication.name"               = "debezium_publication"
+    "slot.name"                      = "debezium_slot"
+    "table.include.list"             = "public.orders,public.trades,public.positions,public.accounts,public.instruments"
+    "key.converter"                  = "org.apache.kafka.connect.json.JsonConverter"
+    "value.converter"                = "org.apache.kafka.connect.json.JsonConverter"
+    "key.converter.schemas.enable"   = "false"
+    "value.converter.schemas.enable" = "true"
+    "database.password"              = "$${secretManager:datalake/aurora/${var.environment}/master-password}"
   }
 
   kafka_cluster {

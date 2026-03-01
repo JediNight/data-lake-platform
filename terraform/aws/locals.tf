@@ -26,9 +26,9 @@ locals {
       audit_retention_days = 90
 
       # Aurora (not used in dev — local Postgres in Kind)
-      enable_aurora          = false
-      aurora_instance_class  = "db.t4g.medium"
-      aurora_instance_count  = 1
+      enable_aurora         = false
+      aurora_instance_class = "db.t4g.medium"
+      aurora_instance_count = 1
 
       # MSK (not used in dev — Strimzi Kafka locally in Kind)
       enable_msk = false
@@ -40,7 +40,7 @@ locals {
       enable_lambda_producer = false
 
       # Glue ETL
-      enable_glue_etl  = true
+      enable_glue_etl   = true
       glue_worker_count = 2
       glue_schedule     = "" # ON_DEMAND for dev
     }
@@ -48,7 +48,7 @@ locals {
     prod = {
       # MSK
       broker_instance_type       = "kafka.m5.large"
-      broker_count               = 2  # Must be multiple of AZ count (2 AZs)
+      broker_count               = 2 # Must be multiple of AZ count (2 AZs)
       default_replication_factor = 2
 
       # S3 lifecycle
@@ -65,9 +65,9 @@ locals {
       audit_retention_days = 1827
 
       # Aurora PostgreSQL
-      enable_aurora          = true
-      aurora_instance_class  = "db.r6g.large"
-      aurora_instance_count  = 2
+      enable_aurora         = true
+      aurora_instance_class = "db.r6g.large"
+      aurora_instance_count = 2
 
       # MSK
       enable_msk = true
