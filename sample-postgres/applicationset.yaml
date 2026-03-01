@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: sample-postgres
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - cluster: localdev
+  template:
+    metadata:
+      name: 'sample-postgres-{{ .cluster }}'
+    spec:
+      project: default
+      source:
+        repoURL: file:///mnt/data-lake-platform
+        targetRevision: HEAD
+        path: 'sample-postgres/overlays/{{ .cluster }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: data
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

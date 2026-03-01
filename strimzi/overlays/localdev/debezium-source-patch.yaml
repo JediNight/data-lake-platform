@@ -1,0 +1,10 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: debezium-postgres-source
+spec:
+  config:
+    database.hostname: "sample-postgres.data.svc.cluster.local"
+    database.port: "5432"
+    database.user: "postgres"
+    database.password: "postgres"

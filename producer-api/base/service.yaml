@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer-api
+  labels:
+    app: producer-api
+spec:
+  type: ClusterIP
+  selector:
+    app: producer-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
