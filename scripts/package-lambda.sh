@@ -13,7 +13,7 @@ rm -rf "$BUILD_DIR" "$ZIP_PATH"
 mkdir -p "$BUILD_DIR"
 
 echo "==> Installing dependencies"
-pip install -q -r "$PRODUCER_DIR/app/requirements.txt" -t "$BUILD_DIR"
+pip3 install -q -r "$PRODUCER_DIR/app/requirements.txt" -t "$BUILD_DIR"
 
 echo "==> Copying application code"
 cp -r "$PRODUCER_DIR/app" "$BUILD_DIR/app"

@@ -62,7 +62,7 @@ locals {
       enable_quicksight = true
 
       # Audit retention — 5 years per SEC Rule 204-2
-      audit_retention_days = 1825
+      audit_retention_days = 1827
 
       # Aurora PostgreSQL
       enable_aurora          = true
