@@ -4,7 +4,7 @@ metadata:
   name: data-lake-connect
 spec:
   bootstrapServers: data-lake-kafka-kafka-bootstrap:9092
-  image: data-lake-connect:with-aws-v5
+  image: data-lake-connect:with-aws-v6
   template:
     pod:
       volumes:
