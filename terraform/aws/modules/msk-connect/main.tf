@@ -168,7 +168,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
   }
 
   connector_configuration = {
-    "connector.class"                    = "io.tabular.iceberg.connect.IcebergSinkConnector"
+    "connector.class"                    = "org.apache.iceberg.connect.IcebergSinkConnector"
     "topics"                             = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions,stream.order-events"
     "iceberg.catalog.type"               = "glue"
     "iceberg.catalog.warehouse"          = "${var.mnpi_bucket_arn}/"
@@ -239,7 +239,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_nonmnpi" {
   }
 
   connector_configuration = {
-    "connector.class"                    = "io.tabular.iceberg.connect.IcebergSinkConnector"
+    "connector.class"                    = "org.apache.iceberg.connect.IcebergSinkConnector"
     "topics"                             = "cdc.trading.accounts,cdc.trading.instruments,stream.market-data"
     "iceberg.catalog.type"               = "glue"
     "iceberg.catalog.warehouse"          = "${var.nonmnpi_bucket_arn}/"

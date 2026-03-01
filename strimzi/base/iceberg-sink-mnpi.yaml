@@ -7,7 +7,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "2"
 spec:
-  class: io.tabular.iceberg.connect.IcebergSinkConnector
+  class: org.apache.iceberg.connect.IcebergSinkConnector
   tasksMax: 1
   config:
     # Topics: MNPI CDC tables + MNPI streaming
