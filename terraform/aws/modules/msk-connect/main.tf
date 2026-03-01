@@ -169,7 +169,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
 
   connector_configuration = {
     "connector.class"                    = "org.apache.iceberg.connect.IcebergSinkConnector"
-    "topics"                             = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions,stream.order-events"
+    "topics"                             = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions"
     "iceberg.catalog.type"               = "glue"
     "iceberg.catalog.warehouse"          = "${var.mnpi_bucket_arn}/"
     "iceberg.tables.auto-create-enabled" = "true"
