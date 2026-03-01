@@ -77,6 +77,7 @@ resource "aws_mskconnect_connector" "debezium_source" {
 
   connector_configuration = {
     "connector.class"                = "io.debezium.connector.postgresql.PostgresConnector"
+    "tasks.max"                      = "1"
     "database.hostname"              = var.postgres_endpoint
     "database.port"                  = tostring(var.postgres_port)
     "database.user"                  = "postgres"
@@ -153,6 +154,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
 
   connector_configuration = {
     "connector.class"                    = "org.apache.iceberg.connect.IcebergSinkConnector"
+    "tasks.max"                          = "1"
     "topics"                             = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions"
     "iceberg.catalog.type"               = "glue"
     "iceberg.catalog.warehouse"          = "${var.mnpi_bucket_arn}/"
@@ -224,6 +226,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_nonmnpi" {
 
   connector_configuration = {
     "connector.class"                    = "org.apache.iceberg.connect.IcebergSinkConnector"
+    "tasks.max"                          = "1"
     "topics"                             = "cdc.trading.accounts,cdc.trading.instruments,stream.market-data"
     "iceberg.catalog.type"               = "glue"
     "iceberg.catalog.warehouse"          = "${var.nonmnpi_bucket_arn}/"
