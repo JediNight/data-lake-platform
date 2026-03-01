@@ -1,7 +1,6 @@
 """Tests for FastAPI endpoints: /health, /api/v1/orders, /api/v1/market-data."""
 
 from decimal import Decimal
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,16 +21,15 @@ async def test_health(client):
 # ---------------------------------------------------------------------------
 
 
-async def test_create_order_success(client, mock_db, mock_kafka, sample_order_payload):
+async def test_create_order_success(client, mock_db, sample_order_payload):
     resp = await client.post("/api/v1/orders", json=sample_order_payload)
     assert resp.status_code == 200
 
     body = resp.json()
     assert body["order_id"] == 42  # mock_db.insert_order returns 42
-    assert "event_id" in body
+    assert "event_id" not in body  # CDC captures changes; no Kafka dual-write
 
     mock_db.insert_order.assert_called_once()
-    mock_kafka.send_order_event.assert_called_once()
 
 
 async def test_create_order_with_limit_price(client, mock_db, mock_kafka):
@@ -66,15 +64,6 @@ async def test_create_order_db_failure_returns_503(
     resp = await client.post("/api/v1/orders", json=sample_order_payload)
     assert resp.status_code == 503
     assert "DB connection lost" in resp.json()["detail"]
-
-
-async def test_create_order_kafka_failure_returns_503(
-    client, mock_db, mock_kafka, sample_order_payload
-):
-    mock_kafka.send_order_event.side_effect = Exception("Kafka broker down")
-    resp = await client.post("/api/v1/orders", json=sample_order_payload)
-    assert resp.status_code == 503
-    assert "Kafka broker down" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

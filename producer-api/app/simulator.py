@@ -1,4 +1,4 @@
-"""Correlated trading simulator that exercises both CDC and streaming paths."""
+"""Trading simulator that exercises CDC (orders via DB) and streaming (market data via Kafka)."""
 
 import asyncio
 import json
@@ -10,7 +10,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 from .database import TradingDatabase
-from .models import MarketDataTick, OrderEvent
+from .models import MarketDataTick
 from .producer import KafkaEventProducer
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class TradingSimulator:
     """Generates correlated trading activity across postgres (CDC) and Kafka (streaming).
 
     Each simulation cycle creates a complete trade lifecycle:
-    order INSERT -> Kafka order event -> trade INSERT -> order UPDATE (FILLED)
+    order INSERT (CDC captures change) -> trade INSERT -> order UPDATE (FILLED)
     -> Kafka market-data tick -> position UPSERT.
     """
 
@@ -118,7 +118,7 @@ class TradingSimulator:
         if order_type == "LIMIT":
             limit_price = self._jitter_price(ticker)
 
-        # --- Step 3: INSERT order into postgres (CDC path) ---
+        # --- Step 3: INSERT order into postgres (CDC captures the change) ---
         order_id = await self._db.insert_order(
             account_id=account_id,
             instrument_id=instrument_id,
@@ -127,21 +127,6 @@ class TradingSimulator:
             order_type=order_type,
             limit_price=limit_price,
         )
-
-        # --- Step 4: Produce OrderEvent to Kafka (streaming path) ---
-        order_event = OrderEvent(
-            event_id=str(uuid.uuid4()),
-            event_type="ORDER_CREATED",
-            order_id=order_id,
-            account_id=account_id,
-            instrument_id=instrument_id,
-            ticker=ticker,
-            side=side,
-            quantity=quantity,
-            limit_price=limit_price,
-            timestamp=datetime.now(timezone.utc),
-        )
-        await self._kafka.send_order_event(order_event)
 
         logger.info(
             "Cycle: order_id=%d %s %s %s qty=%s account=%d (cross-path correlated)",
@@ -153,10 +138,10 @@ class TradingSimulator:
             account_id,
         )
 
-        # --- Step 5: Simulate execution latency ---
+        # --- Step 4: Simulate execution latency ---
         await asyncio.sleep(random.uniform(1.0, 2.0))
 
-        # --- Step 6: Jitter price and INSERT trade ---
+        # --- Step 5: Jitter price and INSERT trade ---
         execution_price = self._jitter_price(ticker)
         trade_id = await self._db.insert_trade(
             order_id=order_id,
@@ -165,7 +150,7 @@ class TradingSimulator:
             price=execution_price,
         )
 
-        # --- Step 7: UPDATE order status to FILLED ---
+        # --- Step 6: UPDATE order status to FILLED ---
         assert self._db.pool is not None, "Database pool is not initialized"
         async with self._db.pool.acquire() as conn:
             await conn.execute(
@@ -174,7 +159,7 @@ class TradingSimulator:
             )
         logger.info("Order %d marked FILLED at price %s (trade %d)", order_id, execution_price, trade_id)
 
-        # --- Step 8: Produce MarketDataTick to Kafka ---
+        # --- Step 7: Produce MarketDataTick to Kafka ---
         spread = execution_price * Decimal("0.001")
         bid = (execution_price - spread).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         ask = (execution_price + spread).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -191,7 +176,7 @@ class TradingSimulator:
         )
         await self._kafka.send_market_data(market_tick)
 
-        # --- Step 9: UPSERT position ---
+        # --- Step 8: UPSERT position ---
         qty_delta = quantity if side == "BUY" else -quantity
         await self._db.upsert_position(
             account_id=account_id,

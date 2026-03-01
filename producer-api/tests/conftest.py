@@ -25,7 +25,6 @@ def mock_db():
 def mock_kafka():
     """AsyncMock of KafkaEventProducer with preset return values."""
     kafka = AsyncMock()
-    kafka.send_order_event = AsyncMock(return_value=None)
     kafka.send_market_data = AsyncMock(return_value=None)
     kafka.start = AsyncMock()
     kafka.stop = AsyncMock()

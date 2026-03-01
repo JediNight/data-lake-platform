@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 class KafkaEventProducer:
-    TOPIC_ORDER_EVENTS = "stream.order-events"
     TOPIC_MARKET_DATA = "stream.market-data"
 
     def __init__(self, bootstrap_servers: str) -> None:
@@ -29,12 +28,6 @@ class KafkaEventProducer:
         if self.producer is not None:
             await self.producer.stop()
             logger.info("Kafka producer stopped")
-
-    async def send_order_event(self, event: BaseModel) -> None:
-        assert self.producer is not None, "Producer not started"
-        value = event.model_dump(mode="json")
-        await self.producer.send_and_wait(self.TOPIC_ORDER_EVENTS, value=value)
-        logger.info("Sent order event to %s", self.TOPIC_ORDER_EVENTS)
 
     async def send_market_data(self, tick: BaseModel) -> None:
         assert self.producer is not None, "Producer not started"

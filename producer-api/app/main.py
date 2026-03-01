@@ -3,9 +3,7 @@
 import asyncio
 import logging
 import sys
-import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -13,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 
 from .config import Settings
 from .database import TradingDatabase
-from .models import MarketDataTick, OrderEvent
+from .models import MarketDataTick
 from .producer import KafkaEventProducer
 from .simulator import TradingSimulator
 
@@ -87,7 +85,7 @@ async def health() -> dict[str, str]:
 
 @app.post("/api/v1/orders")
 async def create_order(payload: dict[str, Any]) -> dict[str, Any]:
-    """Accept an order, persist it to PostgreSQL, and publish an OrderEvent to Kafka."""
+    """Accept an order and persist it to PostgreSQL. CDC (Debezium) captures the change."""
     try:
         order_id = await db.insert_order(
             account_id=int(payload["account_id"]),
@@ -101,26 +99,7 @@ async def create_order(payload: dict[str, Any]) -> dict[str, Any]:
                 else None
             ),
         )
-
-        event = OrderEvent(
-            event_id=str(uuid.uuid4()),
-            event_type="ORDER_CREATED",
-            order_id=order_id,
-            account_id=int(payload["account_id"]),
-            instrument_id=int(payload["instrument_id"]),
-            ticker=str(payload.get("ticker", "")),
-            side=str(payload["side"]),
-            quantity=Decimal(str(payload["quantity"])),
-            limit_price=(
-                Decimal(str(payload["limit_price"]))
-                if payload.get("limit_price") is not None
-                else None
-            ),
-            timestamp=datetime.now(timezone.utc),
-        )
-        await kafka.send_order_event(event)
-
-        return {"order_id": order_id, "event_id": event.event_id}
+        return {"order_id": order_id}
 
     except Exception as exc:
         logger.exception("Failed to create order")
