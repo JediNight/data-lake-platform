@@ -354,7 +354,7 @@ resource "aws_vpc_security_group_ingress_rule" "eks_self" {
 
 resource "aws_security_group" "lambda" {
   name_prefix = "datalake-lambda-${var.environment}-"
-  description = "Lambda producer-api — egress to MSK and Aurora"
+  description = "Lambda producer-api - egress to MSK and Aurora"
   vpc_id      = aws_vpc.main.id
 
   tags = merge(local.common_tags, {

@@ -48,8 +48,8 @@ locals {
     prod = {
       # MSK
       broker_instance_type       = "kafka.m5.large"
-      broker_count               = 3
-      default_replication_factor = 3
+      broker_count               = 2  # Must be multiple of AZ count (2 AZs)
+      default_replication_factor = 2
 
       # S3 lifecycle
       raw_ia_transition_days = 90

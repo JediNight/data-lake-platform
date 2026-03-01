@@ -349,7 +349,7 @@ resource "aws_glue_catalog_table" "cloudtrail_logs" {
 resource "aws_quicksight_account_subscription" "this" {
   count = var.enable_quicksight ? 1 : 0
 
-  account_name          = "datalake-${var.environment}"
+  account_name          = "datalake-${var.account_id}-${var.environment}"
   edition               = "STANDARD"
   authentication_method = "IAM_AND_QUICKSIGHT"
   notification_email    = "admin@example.com"

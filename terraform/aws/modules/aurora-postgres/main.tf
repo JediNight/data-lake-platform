@@ -108,10 +108,6 @@ resource "aws_rds_cluster_parameter_group" "this" {
     apply_method = "pending-reboot"
   }
 
-  parameter {
-    name  = "wal_level"
-    value = "logical"
-  }
 }
 
 # -----------------------------------------------------------------------------

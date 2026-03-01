@@ -22,8 +22,10 @@ resource "aws_s3_object" "debezium_plugin" {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 resource "aws_s3_bucket" "plugins" {
-  bucket        = "datalake-msk-connect-plugins-${var.environment}"
+  bucket        = "datalake-msk-connect-plugins-${data.aws_caller_identity.current.account_id}-${var.environment}"
   force_destroy = true
 }
 
@@ -71,7 +73,7 @@ resource "aws_mskconnect_worker_configuration" "this" {
     key.converter=org.apache.kafka.connect.json.JsonConverter
     value.converter=org.apache.kafka.connect.json.JsonConverter
     key.converter.schemas.enable=false
-    value.converter.schemas.enable=false
+    value.converter.schemas.enable=true
   EOT
 }
 
@@ -82,7 +84,7 @@ resource "aws_mskconnect_worker_configuration" "this" {
 resource "aws_mskconnect_connector" "debezium_source" {
   name = "debezium-source-${var.environment}"
 
-  kafkaconnect_version = "2.7.1"
+  kafkaconnect_version = "3.7.1"
 
   capacity {
     provisioned_capacity {
@@ -105,7 +107,7 @@ resource "aws_mskconnect_connector" "debezium_source" {
     "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
     "value.converter"                    = "org.apache.kafka.connect.json.JsonConverter"
     "key.converter.schemas.enable"       = "false"
-    "value.converter.schemas.enable"     = "false"
+    "value.converter.schemas.enable"     = "true"
     "database.password"                  = "$${secretManager:datalake/aurora/${var.environment}/master-password}"
   }
 
@@ -158,7 +160,7 @@ resource "aws_mskconnect_connector" "debezium_source" {
 resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
   name = "iceberg-sink-mnpi-${var.environment}"
 
-  kafkaconnect_version = "2.7.1"
+  kafkaconnect_version = "3.7.1"
 
   capacity {
     provisioned_capacity {
@@ -177,7 +179,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
     "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
     "value.converter"                    = "org.apache.kafka.connect.json.JsonConverter"
     "key.converter.schemas.enable"       = "false"
-    "value.converter.schemas.enable"     = "false"
+    "value.converter.schemas.enable"     = "true"
   }
 
   kafka_cluster {
@@ -229,7 +231,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
 resource "aws_mskconnect_connector" "iceberg_sink_nonmnpi" {
   name = "iceberg-sink-nonmnpi-${var.environment}"
 
-  kafkaconnect_version = "2.7.1"
+  kafkaconnect_version = "3.7.1"
 
   capacity {
     provisioned_capacity {
@@ -248,7 +250,7 @@ resource "aws_mskconnect_connector" "iceberg_sink_nonmnpi" {
     "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
     "value.converter"                    = "org.apache.kafka.connect.json.JsonConverter"
     "key.converter.schemas.enable"       = "false"
-    "value.converter.schemas.enable"     = "false"
+    "value.converter.schemas.enable"     = "true"
   }
 
   kafka_cluster {

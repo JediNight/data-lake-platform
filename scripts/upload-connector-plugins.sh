@@ -4,7 +4,8 @@
 set -euo pipefail
 
 ENV="${1:?Usage: $0 <environment>}"
-BUCKET="datalake-msk-connect-plugins-${ENV}"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+BUCKET="datalake-msk-connect-plugins-${ACCOUNT_ID}-${ENV}"
 DEBEZIUM_VERSION="2.5.0.Final"
 ICEBERG_VERSION="1.8.1"
 TMP_DIR=$(mktemp -d)

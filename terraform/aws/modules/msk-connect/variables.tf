@@ -55,7 +55,7 @@ variable "debezium_version" {
 }
 
 variable "iceberg_connector_version" {
-  description = "Iceberg sink connector version"
+  description = "Iceberg sink connector version (Apache Iceberg kafka-connect-runtime)"
   type        = string
-  default     = "0.6.19"
+  default     = "1.8.1"
 }

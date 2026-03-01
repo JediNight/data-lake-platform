@@ -39,7 +39,7 @@ variable "master_username" {
 variable "engine_version" {
   description = "Aurora PostgreSQL engine version"
   type        = string
-  default     = "15.4"
+  default     = "15.8"
 }
 
 variable "allowed_security_group_ids" {
