@@ -3,20 +3,20 @@ FROM index.docker.io/tfawibe/data-lake-connect@sha256:37de0c857ae791804e13853632
 # iceberg-aws: S3FileIO, GlueCatalog, DynamoDB lock manager
 # iceberg-aws-bundle: shaded AWS SDK v2 transitive deps for iceberg-aws
 # iceberg-parquet: Parquet read/write support (default Iceberg file format)
-# hadoop-client-runtime: shaded Hadoop classes needed by parquet-hadoop (Configuration, Path)
+# hadoop-common: Hadoop core classes needed by parquet-hadoop (Configuration, Path, FileSystem)
 # failsafe: retry/circuit-breaker lib used by S3FileIO (transitive dep of iceberg-aws)
 # postgresql JDBC driver: required by JdbcCatalog for metadata storage
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws/1.8.1/iceberg-aws-1.8.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.8.1/iceberg-aws-bundle-1.8.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-parquet/1.8.1/iceberg-parquet-1.8.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
-ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.4.1/hadoop-client-runtime-3.4.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-common/3.4.1/hadoop-common-3.4.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/dev/failsafe/failsafe/3.3.2/failsafe-3.3.2.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 USER root
 RUN chmod 644 /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-aws-1.8.1.jar \
               /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-aws-bundle-1.8.1.jar \
               /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-parquet-1.8.1.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/hadoop-client-runtime-3.4.1.jar \
+              /opt/kafka/plugins/iceberg-sink/3f1b5581/hadoop-common-3.4.1.jar \
               /opt/kafka/plugins/iceberg-sink/3f1b5581/failsafe-3.3.2.jar \
               /opt/kafka/plugins/iceberg-sink/3f1b5581/postgresql-42.7.4.jar
 USER 1001
