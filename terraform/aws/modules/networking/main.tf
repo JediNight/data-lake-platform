@@ -1,18 +1,22 @@
 /**
- * networking — VPC, Subnets, S3 Gateway Endpoint, Security Groups
+ * networking — VPC, Subnets, S3 Gateway Endpoint, NAT Gateway, Security Groups
  *
  * Creates the network foundation for the data lake platform:
  *   1. VPC with DNS support and hostnames enabled
  *   2. Two private subnets across two AZs (for MSK and EKS workloads)
- *   3. S3 VPC gateway endpoint (keeps Iceberg writes within AWS network)
- *   4. Security groups for MSK brokers and EKS worker nodes
+ *   3. One public subnet for NAT Gateway placement (no workloads)
+ *   4. Internet Gateway + NAT Gateway (private subnet outbound for Lambda,
+ *      CloudWatch Logs, Secrets Manager, etc.)
+ *   5. S3 VPC gateway endpoint (keeps Iceberg writes within AWS network)
+ *   6. Security groups for MSK brokers, EKS worker nodes, and Lambda functions
  *
  * DESIGN DECISION:
- *   Subnets are purely private with no internet gateway. The S3 gateway
- *   endpoint is associated with the private route table so that Kafka
- *   Connect Iceberg sink writes flow directly to S3 without traversing
- *   the public internet. This is both a cost optimization and a security
- *   hardening measure.
+ *   Workload subnets remain private. A single public subnet hosts the NAT
+ *   Gateway so that VPC-attached Lambda functions (and future EKS pods) can
+ *   reach AWS service endpoints that lack VPC interface endpoints. The S3
+ *   gateway endpoint is still associated with the private route table so
+ *   that Kafka Connect Iceberg sink writes flow directly to S3 without
+ *   traversing the public internet.
  */
 
 terraform {
@@ -107,6 +111,87 @@ resource "aws_route_table_association" "private" {
 
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private.id
+}
+
+# =============================================================================
+# Public Subnet (for NAT Gateway only — no workloads)
+# =============================================================================
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = cidrsubnet(var.vpc_cidr, 8, 100) # 10.0.100.0/24
+  availability_zone       = local.azs[0]
+  map_public_ip_on_launch = false
+
+  tags = merge(local.common_tags, {
+    Name = "datalake-public-${local.azs[0]}-${var.environment}"
+    Tier = "public"
+  })
+}
+
+# =============================================================================
+# Internet Gateway
+# =============================================================================
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = merge(local.common_tags, {
+    Name = "datalake-igw-${var.environment}"
+  })
+}
+
+# =============================================================================
+# Public Route Table (IGW route for NAT Gateway outbound)
+# =============================================================================
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "datalake-public-rt-${var.environment}"
+    Tier = "public"
+  })
+}
+
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
+}
+
+# =============================================================================
+# NAT Gateway (private subnet outbound via public subnet)
+# =============================================================================
+
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = merge(local.common_tags, {
+    Name = "datalake-nat-eip-${var.environment}"
+  })
+}
+
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public.id
+
+  tags = merge(local.common_tags, {
+    Name = "datalake-nat-${var.environment}"
+  })
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+# Default route for private subnets via NAT Gateway
+resource "aws_route" "private_nat" {
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main.id
 }
 
 # =============================================================================
@@ -263,4 +348,64 @@ resource "aws_vpc_security_group_ingress_rule" "eks_self" {
   tags = merge(local.common_tags, {
     Name = "eks-ingress-self"
   })
+}
+
+# --- Lambda Security Group --------------------------------------------------
+
+resource "aws_security_group" "lambda" {
+  name_prefix = "datalake-lambda-${var.environment}-"
+  description = "Lambda producer-api — egress to MSK and Aurora"
+  vpc_id      = aws_vpc.main.id
+
+  tags = merge(local.common_tags, {
+    Name = "datalake-lambda-sg-${var.environment}"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_vpc_security_group_egress_rule" "lambda_to_msk" {
+  security_group_id            = aws_security_group.lambda.id
+  description                  = "Kafka IAM auth (9098) to MSK brokers"
+  from_port                    = 9098
+  to_port                      = 9098
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.msk.id
+
+  tags = merge(local.common_tags, { Name = "lambda-egress-to-msk" })
+}
+
+resource "aws_vpc_security_group_egress_rule" "lambda_to_aurora" {
+  security_group_id            = aws_security_group.lambda.id
+  description                  = "PostgreSQL (5432) to Aurora"
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  cidr_ipv4                    = var.vpc_cidr
+
+  tags = merge(local.common_tags, { Name = "lambda-egress-to-aurora" })
+}
+
+resource "aws_vpc_security_group_egress_rule" "lambda_all_outbound" {
+  security_group_id = aws_security_group.lambda.id
+  description       = "All outbound (NAT Gateway for AWS endpoints)"
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+
+  tags = merge(local.common_tags, { Name = "lambda-egress-all" })
+}
+
+# --- MSK ingress from Lambda ------------------------------------------------
+
+resource "aws_vpc_security_group_ingress_rule" "msk_from_lambda" {
+  security_group_id            = aws_security_group.msk.id
+  description                  = "Kafka IAM auth (9098) from Lambda producer"
+  from_port                    = 9098
+  to_port                      = 9098
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.lambda.id
+
+  tags = merge(local.common_tags, { Name = "msk-ingress-from-lambda" })
 }

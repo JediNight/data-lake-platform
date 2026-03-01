@@ -37,6 +37,29 @@ output "eks_node_security_group_id" {
   value       = aws_security_group.eks_node.id
 }
 
+output "lambda_security_group_id" {
+  description = "Security group ID for Lambda producer-api"
+  value       = aws_security_group.lambda.id
+}
+
+# =============================================================================
+# Subnets — Public
+# =============================================================================
+
+output "public_subnet_id" {
+  description = "Public subnet ID (NAT Gateway placement)"
+  value       = aws_subnet.public.id
+}
+
+# =============================================================================
+# NAT Gateway
+# =============================================================================
+
+output "nat_gateway_id" {
+  description = "NAT Gateway ID"
+  value       = aws_nat_gateway.main.id
+}
+
 # =============================================================================
 # VPC Endpoints
 # =============================================================================
