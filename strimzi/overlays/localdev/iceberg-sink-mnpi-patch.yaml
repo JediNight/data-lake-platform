@@ -4,7 +4,10 @@ metadata:
   name: iceberg-sink-mnpi
 spec:
   config:
-    iceberg.catalog.type: "hadoop"
+    iceberg.catalog.type: "jdbc"
+    iceberg.catalog.uri: "jdbc:postgresql://sample-postgres.data.svc.cluster.local:5432/trading"
+    iceberg.catalog.jdbc.user: "postgres"
+    iceberg.catalog.jdbc.password: "postgres"
     iceberg.catalog.warehouse: "s3://datalake-local-iceberg-dev/mnpi"
     iceberg.catalog.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
     iceberg.catalog.s3.region: "us-east-1"

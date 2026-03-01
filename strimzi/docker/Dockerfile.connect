@@ -1,11 +1,10 @@
 FROM index.docker.io/tfawibe/data-lake-connect@sha256:37de0c857ae791804e13853632bf7b088b8214afaae6aaf5bb24ef7eacbd5ef0
 
-# Add iceberg-aws-bundle (S3FileIO + AWS SDK) and hadoop-client-runtime (HadoopCatalog deps)
+# iceberg-aws-bundle: S3FileIO + AWS SDK for writing data files to S3
+# postgresql JDBC driver: required by JdbcCatalog for metadata storage
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.8.1/iceberg-aws-bundle-1.8.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
-ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.4.1/hadoop-client-runtime-3.4.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
-ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-api/3.4.1/hadoop-client-api-3.4.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 USER root
 RUN chmod 644 /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-aws-bundle-1.8.1.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/hadoop-client-runtime-3.4.1.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/hadoop-client-api-3.4.1.jar
+              /opt/kafka/plugins/iceberg-sink/3f1b5581/postgresql-42.7.4.jar
 USER 1001
