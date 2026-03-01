@@ -127,3 +127,16 @@ output "glue_etl_job_names" {
   description = "Glue ETL job names"
   value       = local.c.enable_glue_etl ? module.glue_etl[0].job_names : null
 }
+
+# -----------------------------------------------------------------------------
+# Lambda Producer API (prod only)
+# -----------------------------------------------------------------------------
+output "lambda_api_endpoint" {
+  description = "Lambda producer API Gateway endpoint"
+  value       = local.c.enable_lambda_producer ? module.lambda_producer[0].api_endpoint : null
+}
+
+output "lambda_function_name" {
+  description = "Lambda producer function name"
+  value       = local.c.enable_lambda_producer ? module.lambda_producer[0].function_name : null
+}

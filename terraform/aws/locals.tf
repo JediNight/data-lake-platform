@@ -36,6 +36,9 @@ locals {
       # MSK Connect (not used in dev — Strimzi Kafka Connect locally)
       enable_msk_connect = false
 
+      # Lambda producer (not used in dev — producer runs locally)
+      enable_lambda_producer = false
+
       # Glue ETL
       enable_glue_etl  = true
       glue_worker_count = 2
@@ -70,6 +73,9 @@ locals {
 
       # MSK Connect
       enable_msk_connect = true
+
+      # Lambda producer
+      enable_lambda_producer = true
 
       # Glue ETL
       enable_glue_etl   = true

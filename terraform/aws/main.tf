@@ -203,8 +203,11 @@ module "aurora_postgres" {
   instance_class = local.c.aurora_instance_class
   instance_count = local.c.aurora_instance_count
 
-  # Allow ingress from MSK Connect (Debezium needs Aurora access)
-  allowed_security_group_ids = local.c.enable_msk_connect ? [module.networking.msk_security_group_id] : []
+  # Allow ingress from MSK Connect (Debezium) and Lambda producer
+  allowed_security_group_ids = compact([
+    local.c.enable_msk_connect ? module.networking.msk_security_group_id : "",
+    module.networking.lambda_security_group_id,
+  ])
 }
 
 # =============================================================================
@@ -227,4 +230,31 @@ module "msk_connect" {
   # Aurora connection info
   postgres_endpoint = local.c.enable_aurora ? module.aurora_postgres[0].cluster_endpoint : ""
   postgres_port     = local.c.enable_aurora ? module.aurora_postgres[0].cluster_port : 5432
+}
+
+# =============================================================================
+# Lambda Producer API (prod only — FastAPI on Lambda + API Gateway)
+# =============================================================================
+
+module "lambda_producer" {
+  source = "./modules/lambda-producer"
+  count  = local.c.enable_lambda_producer ? 1 : 0
+
+  environment              = local.env
+  subnet_ids               = module.networking.private_subnet_ids
+  lambda_security_group_id = module.networking.lambda_security_group_id
+  msk_cluster_arn          = module.streaming[0].cluster_arn
+  msk_bootstrap_brokers    = module.streaming[0].bootstrap_brokers_iam
+  aurora_secret_arn        = module.aurora_postgres[0].master_password_secret_arn
+
+  postgres_dsn = format("postgresql://%s:%s@%s:%s/trading",
+    "postgres",
+    "PLACEHOLDER",
+    module.aurora_postgres[0].cluster_endpoint,
+    module.aurora_postgres[0].cluster_port,
+  )
+
+  lambda_zip_path = "${path.module}/../../.build/lambda-producer.zip"
+
+  tags = {}
 }
