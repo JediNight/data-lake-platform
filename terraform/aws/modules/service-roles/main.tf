@@ -34,37 +34,36 @@ resource "aws_iam_role" "kafka_connect" {
   name = "datalake-kafka-connect-${var.environment}"
   path = "/datalake/"
 
-  # When EKS is enabled, use IRSA (web identity federation).
-  # When EKS is not available (dev), create a minimal placeholder trust
-  # so the role exists for bucket policy references.
-  assume_role_policy = var.eks_oidc_provider_arn != "" ? jsonencode({
+  # MSK Connect (AWS-managed) always needs kafkaconnect.amazonaws.com.
+  # When EKS is also enabled, add IRSA for Strimzi (self-hosted) connectors.
+  assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowEKSServiceAccountAssume"
-        Effect = "Allow"
-        Principal = {
-          Federated = var.eks_oidc_provider_arn
-        }
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Condition = {
-          StringEquals = {
-            "${var.eks_oidc_provider_url}:sub" = "system:serviceaccount:${var.kafka_connect_namespace}:${var.kafka_connect_service_account}"
-            "${var.eks_oidc_provider_url}:aud" = "sts.amazonaws.com"
+    Statement = concat(
+      [
+        {
+          Sid       = "AllowMSKConnect"
+          Effect    = "Allow"
+          Principal = { Service = "kafkaconnect.amazonaws.com" }
+          Action    = "sts:AssumeRole"
+        },
+      ],
+      var.eks_oidc_provider_arn != "" ? [
+        {
+          Sid    = "AllowEKSServiceAccountAssume"
+          Effect = "Allow"
+          Principal = {
+            Federated = var.eks_oidc_provider_arn
           }
-        }
-      },
-    ]
-    }) : jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DenyAll"
-        Effect    = "Deny"
-        Principal = { AWS = "*" }
-        Action    = "sts:AssumeRole"
-      },
-    ]
+          Action = "sts:AssumeRoleWithWebIdentity"
+          Condition = {
+            StringEquals = {
+              "${var.eks_oidc_provider_url}:sub" = "system:serviceaccount:${var.kafka_connect_namespace}:${var.kafka_connect_service_account}"
+              "${var.eks_oidc_provider_url}:aud" = "sts.amazonaws.com"
+            }
+          }
+        },
+      ] : [],
+    )
   })
 
   tags = merge(local.common_tags, {
