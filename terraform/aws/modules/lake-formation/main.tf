@@ -85,17 +85,20 @@ resource "aws_lakeformation_data_lake_settings" "this" {
 }
 
 # =============================================================================
-# Identity Center Configuration
+# Identity Center Configuration (Trusted Identity Propagation)
 # =============================================================================
-# NOTE: The aws_lakeformation_identity_center_configuration resource requires
-# the AWS provider >= 6.19.  This project currently uses ~> 5.0.  To enable
-# trusted identity propagation (TIP) between Lake Formation and Identity
-# Center, run the following AWS CLI command after the initial apply:
-#
-#   aws lakeformation create-lake-formation-identity-center-configuration
-#
-# Once the provider is upgraded to v6.x this can be managed in Terraform.
+# Bridges Lake Formation to IAM Identity Center for trusted identity
+# propagation.  Requires provider >= 6.19 (resource shipped Oct 2025,
+# hashicorp/terraform-provider-aws PR #44867).
 # =============================================================================
+
+resource "aws_lakeformation_identity_center_configuration" "this" {
+  instance_arn = var.sso_instance_arn
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+  ]
+}
 
 # =============================================================================
 # LF-Tags (2 tag keys)
@@ -173,169 +176,157 @@ resource "aws_lakeformation_resource" "nonmnpi_bucket" {
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# 1. Finance Analyst -- DATABASE-level grant
+# Tag-Based Grants (native aws_lakeformation_permissions)
+# -----------------------------------------------------------------------------
+# Provider v6.x replaces the old null_resource + local-exec workaround.
+# The v5.x provider couldn't read back LF-tag-policy permissions granted to
+# Identity Center group principals.  If v6.x still has this issue, these
+# resources will fail on apply and we'll revert to the CLI workaround
+# (preserved in git history).
 # -----------------------------------------------------------------------------
 
-resource "aws_lakeformation_permissions" "finance_analyst_db" {
-  principal   = "arn:aws:identitystore:::group/${var.finance_analysts_group_id}"
-  permissions = ["DESCRIBE"]
-
-  lf_tag_policy {
-    resource_type = "DATABASE"
-
-    expression {
-      key    = aws_lakeformation_lf_tag.sensitivity.key
-      values = ["mnpi", "non-mnpi"]
+locals {
+  # LF-tag-policy grants: each entry maps to one aws_lakeformation_permissions
+  lf_tag_policy_grants = {
+    # 1. Finance Analyst
+    finance_analyst_db = {
+      principal     = "arn:aws:identitystore:::group/${var.finance_analysts_group_id}"
+      permissions   = ["DESCRIBE"]
+      resource_type = "DATABASE"
+      expression = [
+        { key = "sensitivity", values = ["mnpi", "non-mnpi"] },
+        { key = "layer", values = ["curated", "analytics"] },
+      ]
+    }
+    finance_analyst_table = {
+      principal     = "arn:aws:identitystore:::group/${var.finance_analysts_group_id}"
+      permissions   = ["SELECT", "DESCRIBE"]
+      resource_type = "TABLE"
+      expression = [
+        { key = "sensitivity", values = ["mnpi", "non-mnpi"] },
+        { key = "layer", values = ["curated", "analytics"] },
+      ]
     }
 
-    expression {
-      key    = aws_lakeformation_lf_tag.layer.key
-      values = ["curated", "analytics"]
+    # 2. Data Analyst
+    data_analyst_db = {
+      principal     = "arn:aws:identitystore:::group/${var.data_analysts_group_id}"
+      permissions   = ["DESCRIBE"]
+      resource_type = "DATABASE"
+      expression = [
+        { key = "sensitivity", values = ["non-mnpi"] },
+        { key = "layer", values = ["curated", "analytics"] },
+      ]
+    }
+    data_analyst_table = {
+      principal     = "arn:aws:identitystore:::group/${var.data_analysts_group_id}"
+      permissions   = ["SELECT", "DESCRIBE"]
+      resource_type = "TABLE"
+      expression = [
+        { key = "sensitivity", values = ["non-mnpi"] },
+        { key = "layer", values = ["curated", "analytics"] },
+      ]
+    }
+
+    # 3. Data Engineer
+    data_engineer_db = {
+      principal     = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
+      permissions   = ["ALL"]
+      resource_type = "DATABASE"
+      expression = [
+        { key = "sensitivity", values = ["mnpi", "non-mnpi"] },
+        { key = "layer", values = ["raw", "curated", "analytics"] },
+      ]
+    }
+    data_engineer_table = {
+      principal     = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
+      permissions   = ["ALL"]
+      resource_type = "TABLE"
+      expression = [
+        { key = "sensitivity", values = ["mnpi", "non-mnpi"] },
+        { key = "layer", values = ["raw", "curated", "analytics"] },
+      ]
+    }
+  }
+
+  # Data-location grants (S3 bucket access for data engineers)
+  lf_data_location_grants = {
+    data_engineer_location_mnpi = {
+      principal = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
+      arn       = var.mnpi_bucket_arn
+    }
+    data_engineer_location_nonmnpi = {
+      principal = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
+      arn       = var.nonmnpi_bucket_arn
+    }
+  }
+}
+
+resource "aws_lakeformation_permissions" "tag_policy_grant" {
+  for_each = local.lf_tag_policy_grants
+
+  principal   = each.value.principal
+  permissions = each.value.permissions
+
+  lf_tag_policy {
+    resource_type = each.value.resource_type
+
+    dynamic "expression" {
+      for_each = each.value.expression
+      content {
+        key    = expression.value.key
+        values = expression.value.values
+      }
     }
   }
 
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+    aws_lakeformation_resource.mnpi_bucket,
+    aws_lakeformation_resource.nonmnpi_bucket,
+    aws_lakeformation_lf_tag.sensitivity,
+    aws_lakeformation_lf_tag.layer,
   ]
 }
 
-# Finance Analyst -- TABLE-level grant (SELECT)
+resource "aws_lakeformation_permissions" "data_location_grant" {
+  for_each = local.lf_data_location_grants
 
-resource "aws_lakeformation_permissions" "finance_analyst_table" {
-  principal   = "arn:aws:identitystore:::group/${var.finance_analysts_group_id}"
-  permissions = ["SELECT", "DESCRIBE"]
-
-  lf_tag_policy {
-    resource_type = "TABLE"
-
-    expression {
-      key    = aws_lakeformation_lf_tag.sensitivity.key
-      values = ["mnpi", "non-mnpi"]
-    }
-
-    expression {
-      key    = aws_lakeformation_lf_tag.layer.key
-      values = ["curated", "analytics"]
-    }
-  }
-
-  depends_on = [
-    aws_lakeformation_data_lake_settings.this,
-  ]
-}
-
-# -----------------------------------------------------------------------------
-# 2. Data Analyst -- DATABASE-level grant
-# -----------------------------------------------------------------------------
-
-resource "aws_lakeformation_permissions" "data_analyst_db" {
-  principal   = "arn:aws:identitystore:::group/${var.data_analysts_group_id}"
-  permissions = ["DESCRIBE"]
-
-  lf_tag_policy {
-    resource_type = "DATABASE"
-
-    expression {
-      key    = aws_lakeformation_lf_tag.sensitivity.key
-      values = ["non-mnpi"]
-    }
-
-    expression {
-      key    = aws_lakeformation_lf_tag.layer.key
-      values = ["curated", "analytics"]
-    }
-  }
-
-  depends_on = [
-    aws_lakeformation_data_lake_settings.this,
-  ]
-}
-
-# Data Analyst -- TABLE-level grant (SELECT)
-
-resource "aws_lakeformation_permissions" "data_analyst_table" {
-  principal   = "arn:aws:identitystore:::group/${var.data_analysts_group_id}"
-  permissions = ["SELECT", "DESCRIBE"]
-
-  lf_tag_policy {
-    resource_type = "TABLE"
-
-    expression {
-      key    = aws_lakeformation_lf_tag.sensitivity.key
-      values = ["non-mnpi"]
-    }
-
-    expression {
-      key    = aws_lakeformation_lf_tag.layer.key
-      values = ["curated", "analytics"]
-    }
-  }
-
-  depends_on = [
-    aws_lakeformation_data_lake_settings.this,
-  ]
-}
-
-# -----------------------------------------------------------------------------
-# 3. Data Engineer -- DATABASE-level grant (ALL)
-# -----------------------------------------------------------------------------
-
-resource "aws_lakeformation_permissions" "data_engineer_db" {
-  principal   = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
-  permissions = ["ALL"]
-
-  lf_tag_policy {
-    resource_type = "DATABASE"
-
-    expression {
-      key    = aws_lakeformation_lf_tag.sensitivity.key
-      values = ["mnpi", "non-mnpi"]
-    }
-
-    expression {
-      key    = aws_lakeformation_lf_tag.layer.key
-      values = ["raw", "curated", "analytics"]
-    }
-  }
-
-  depends_on = [
-    aws_lakeformation_data_lake_settings.this,
-  ]
-}
-
-# Data Engineer -- TABLE-level grant (ALL)
-
-resource "aws_lakeformation_permissions" "data_engineer_table" {
-  principal   = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
-  permissions = ["ALL"]
-
-  lf_tag_policy {
-    resource_type = "TABLE"
-
-    expression {
-      key    = aws_lakeformation_lf_tag.sensitivity.key
-      values = ["mnpi", "non-mnpi"]
-    }
-
-    expression {
-      key    = aws_lakeformation_lf_tag.layer.key
-      values = ["raw", "curated", "analytics"]
-    }
-  }
-
-  depends_on = [
-    aws_lakeformation_data_lake_settings.this,
-  ]
-}
-
-# Data Engineer -- DATA_LOCATION_ACCESS on MNPI bucket
-
-resource "aws_lakeformation_permissions" "data_engineer_location_mnpi" {
-  principal   = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
+  principal   = each.value.principal
   permissions = ["DATA_LOCATION_ACCESS"]
 
   data_location {
-    arn = aws_lakeformation_resource.mnpi_bucket.arn
+    arn = each.value.arn
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+    aws_lakeformation_resource.mnpi_bucket,
+    aws_lakeformation_resource.nonmnpi_bucket,
+  ]
+}
+
+# =============================================================================
+# Glue ETL Role — Database & Table Permissions
+# =============================================================================
+# The Glue ETL role needs:
+#   - DESCRIBE + CREATE_TABLE on all 6 databases
+#   - SELECT on tables in raw databases (read sources)
+#   - ALL on tables in curated + analytics databases (write targets)
+# Uses native aws_lakeformation_permissions (IAM role principals work
+# correctly — the historical v5.x bug only affected Identity Center groups).
+# =============================================================================
+
+resource "aws_lakeformation_permissions" "glue_etl_databases" {
+  for_each = var.database_names
+
+  principal   = var.glue_etl_role_arn
+  permissions = ["DESCRIBE", "CREATE_TABLE"]
+
+  database {
+    name = each.value
   }
 
   depends_on = [
@@ -343,14 +334,37 @@ resource "aws_lakeformation_permissions" "data_engineer_location_mnpi" {
   ]
 }
 
-# Data Engineer -- DATA_LOCATION_ACCESS on non-MNPI bucket
+resource "aws_lakeformation_permissions" "glue_etl_raw_tables" {
+  for_each = {
+    for k, v in var.database_names : k => v
+    if startswith(k, "raw_")
+  }
 
-resource "aws_lakeformation_permissions" "data_engineer_location_nonmnpi" {
-  principal   = "arn:aws:identitystore:::group/${var.data_engineers_group_id}"
-  permissions = ["DATA_LOCATION_ACCESS"]
+  principal   = var.glue_etl_role_arn
+  permissions = ["SELECT", "DESCRIBE"]
 
-  data_location {
-    arn = aws_lakeformation_resource.nonmnpi_bucket.arn
+  table {
+    database_name = each.value
+    wildcard      = true
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+  ]
+}
+
+resource "aws_lakeformation_permissions" "glue_etl_write_tables" {
+  for_each = {
+    for k, v in var.database_names : k => v
+    if startswith(k, "curated_") || startswith(k, "analytics_")
+  }
+
+  principal   = var.glue_etl_role_arn
+  permissions = ["ALL"]
+
+  table {
+    database_name = each.value
+    wildcard      = true
   }
 
   depends_on = [

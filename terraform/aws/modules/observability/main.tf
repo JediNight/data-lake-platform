@@ -134,7 +134,7 @@ resource "aws_s3_bucket_policy" "audit_cloudtrail" {
         Resource = var.audit_bucket_arn
         Condition = {
           StringEquals = {
-            "aws:SourceArn" = "arn:aws:cloudtrail:${data.aws_region.current.name}:${var.account_id}:trail/${local.trail_name}"
+            "aws:SourceArn" = "arn:aws:cloudtrail:${data.aws_region.current.id}:${var.account_id}:trail/${local.trail_name}"
           }
         }
       },
@@ -149,7 +149,7 @@ resource "aws_s3_bucket_policy" "audit_cloudtrail" {
         Condition = {
           StringEquals = {
             "s3:x-amz-acl"  = "bucket-owner-full-control"
-            "aws:SourceArn" = "arn:aws:cloudtrail:${data.aws_region.current.name}:${var.account_id}:trail/${local.trail_name}"
+            "aws:SourceArn" = "arn:aws:cloudtrail:${data.aws_region.current.id}:${var.account_id}:trail/${local.trail_name}"
           }
         }
       },

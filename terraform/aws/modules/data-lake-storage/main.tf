@@ -41,7 +41,7 @@ locals {
     mnpi          = "datalake-mnpi-${var.environment}"
     nonmnpi       = "datalake-nonmnpi-${var.environment}"
     audit         = "datalake-audit-${var.environment}"
-    query_results = "datalake-query-results-${var.environment}"
+    query_results = "datalake-query-results-${local.account_id}-${var.environment}"
   }
 
   common_tags = merge(var.tags, {

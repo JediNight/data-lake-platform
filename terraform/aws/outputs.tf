@@ -39,12 +39,12 @@ output "query_results_bucket_id" {
 # -----------------------------------------------------------------------------
 output "msk_cluster_arn" {
   description = "MSK cluster ARN"
-  value       = module.streaming.cluster_arn
+  value       = local.c.enable_msk ? module.streaming[0].cluster_arn : null
 }
 
 output "msk_bootstrap_brokers_iam" {
   description = "MSK IAM bootstrap broker connection string"
-  value       = module.streaming.bootstrap_brokers_iam
+  value       = local.c.enable_msk ? module.streaming[0].bootstrap_brokers_iam : null
 }
 
 # -----------------------------------------------------------------------------
@@ -86,6 +86,11 @@ output "kafka_connect_role_arn" {
   value       = module.service_roles.kafka_connect_role_arn
 }
 
+output "glue_etl_role_arn" {
+  description = "Glue ETL IAM role ARN"
+  value       = module.service_roles.glue_etl_role_arn
+}
+
 # -----------------------------------------------------------------------------
 # Analytics — Athena
 # -----------------------------------------------------------------------------
@@ -103,22 +108,22 @@ output "cloudtrail_arn" {
 }
 
 # -----------------------------------------------------------------------------
-# EKS (prod only)
-# -----------------------------------------------------------------------------
-output "eks_cluster_endpoint" {
-  description = "EKS cluster API endpoint"
-  value       = local.c.enable_eks ? module.eks[0].cluster_endpoint : null
-}
-
-output "eks_cluster_name" {
-  description = "EKS cluster name"
-  value       = local.c.enable_eks ? module.eks[0].cluster_name : null
-}
-
-# -----------------------------------------------------------------------------
 # Aurora PostgreSQL (prod only)
 # -----------------------------------------------------------------------------
 output "aurora_cluster_endpoint" {
   description = "Aurora PostgreSQL writer endpoint"
   value       = local.c.enable_aurora ? module.aurora_postgres[0].cluster_endpoint : null
+}
+
+# -----------------------------------------------------------------------------
+# Glue ETL
+# -----------------------------------------------------------------------------
+output "glue_etl_workflow_name" {
+  description = "Glue medallion workflow name"
+  value       = local.c.enable_glue_etl ? module.glue_etl[0].workflow_name : null
+}
+
+output "glue_etl_job_names" {
+  description = "Glue ETL job names"
+  value       = local.c.enable_glue_etl ? module.glue_etl[0].job_names : null
 }

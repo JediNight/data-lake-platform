@@ -16,7 +16,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 }
@@ -55,6 +55,7 @@ module "data_lake_storage" {
   allowed_principal_arns = [
     module.identity_center.data_engineer_sso_role_pattern,
     module.service_roles.kafka_connect_role_arn,
+    module.service_roles.glue_etl_role_arn,
   ]
   raw_ia_transition_days = local.c.raw_ia_transition_days
 }
@@ -64,7 +65,9 @@ module "data_lake_storage" {
 # =============================================================================
 
 module "streaming" {
-  source                     = "./modules/streaming"
+  source = "./modules/streaming"
+  count  = local.c.enable_msk ? 1 : 0
+
   environment                = local.env
   broker_instance_type       = local.c.broker_instance_type
   broker_count               = local.c.broker_count
@@ -106,11 +109,22 @@ module "service_roles" {
   mnpi_bucket_arn    = module.data_lake_storage.mnpi_bucket_arn
   nonmnpi_bucket_arn = module.data_lake_storage.nonmnpi_bucket_arn
   glue_registry_arn  = module.glue_catalog.registry_arn
-  msk_cluster_arn    = module.streaming.cluster_arn
+  msk_cluster_arn    = local.c.enable_msk ? module.streaming[0].cluster_arn : ""
 
-  # Wired from EKS module when enabled (prod), empty strings for dev
-  eks_oidc_provider_arn = local.c.enable_eks ? module.eks[0].oidc_provider_arn : ""
-  eks_oidc_provider_url = local.c.enable_eks ? module.eks[0].oidc_provider_url : ""
+  # Glue ETL role needs KMS keys for encrypted S3 data and scripts bucket
+  mnpi_kms_key_arn         = module.data_lake_storage.mnpi_kms_key_arn
+  nonmnpi_kms_key_arn      = module.data_lake_storage.nonmnpi_kms_key_arn
+  query_results_bucket_arn = module.data_lake_storage.query_results_bucket_arn
+
+  # Dev: raw tables live in the local-iceberg bucket (Phase 1 Athena SQL);
+  # Glue ETL needs read access to load source Iceberg metadata + data.
+  extra_s3_read_bucket_arns = [
+    "arn:aws:s3:::datalake-local-iceberg-${local.env}",
+  ]
+
+  # EKS removed — serverless architecture (Lambda + MSK Connect)
+  eks_oidc_provider_arn = ""
+  eks_oidc_provider_url = ""
 }
 
 # =============================================================================
@@ -127,6 +141,8 @@ module "lake_formation" {
   data_analysts_group_id    = module.identity_center.data_analysts_group_id
   data_engineers_group_id   = module.identity_center.data_engineers_group_id
   admin_role_arn            = var.admin_role_arn
+  sso_instance_arn          = module.identity_center.sso_instance_arn
+  glue_etl_role_arn         = module.service_roles.glue_etl_role_arn
 }
 
 # =============================================================================
@@ -159,19 +175,18 @@ module "observability" {
 }
 
 # =============================================================================
-# EKS Cluster (prod only)
+# Glue ETL (medallion transforms — raw → curated → analytics)
 # =============================================================================
 
-module "eks" {
-  source = "./modules/eks"
-  count  = local.c.enable_eks ? 1 : 0
+module "glue_etl" {
+  source = "./modules/glue-etl"
+  count  = local.c.enable_glue_etl ? 1 : 0
 
-  environment        = local.env
-  cluster_name       = "data-lake-${local.env}"
-  subnet_ids         = module.networking.private_subnet_ids
-  node_instance_type = local.c.eks_node_instance_type
-  node_count         = local.c.eks_node_count
-  vpc_id             = module.networking.vpc_id
+  environment       = local.env
+  glue_role_arn     = module.service_roles.glue_etl_role_arn
+  scripts_bucket_id = module.data_lake_storage.query_results_bucket_id
+  worker_count      = local.c.glue_worker_count
+  tags              = {}
 }
 
 # =============================================================================
@@ -188,8 +203,8 @@ module "aurora_postgres" {
   instance_class = local.c.aurora_instance_class
   instance_count = local.c.aurora_instance_count
 
-  # Allow ingress from EKS node security group
-  allowed_security_group_ids = local.c.enable_eks ? [module.eks[0].node_security_group_id] : []
+  # Allow ingress from MSK Connect (Debezium needs Aurora access)
+  allowed_security_group_ids = local.c.enable_msk_connect ? [module.networking.msk_security_group_id] : []
 }
 
 # =============================================================================
@@ -201,8 +216,8 @@ module "msk_connect" {
   count  = local.c.enable_msk_connect ? 1 : 0
 
   environment            = local.env
-  msk_cluster_arn        = module.streaming.cluster_arn
-  msk_bootstrap_brokers  = module.streaming.bootstrap_brokers_iam
+  msk_cluster_arn        = module.streaming[0].cluster_arn
+  msk_bootstrap_brokers  = module.streaming[0].bootstrap_brokers_iam
   subnet_ids             = module.networking.private_subnet_ids
   security_group_ids     = [module.networking.msk_security_group_id]
   mnpi_bucket_arn        = module.data_lake_storage.mnpi_bucket_arn

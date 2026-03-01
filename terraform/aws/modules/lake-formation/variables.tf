@@ -45,6 +45,16 @@ variable "admin_role_arn" {
   type        = string
 }
 
+variable "sso_instance_arn" {
+  description = "IAM Identity Center instance ARN for Trusted Identity Propagation"
+  type        = string
+}
+
+variable "glue_etl_role_arn" {
+  description = "ARN of the Glue ETL IAM role (for database/table permissions)"
+  type        = string
+}
+
 variable "tags" {
   description = "Common resource tags"
   type        = map(string)

@@ -120,7 +120,7 @@ resource "aws_route_table_association" "private" {
 
 resource "aws_vpc_endpoint" "s3" {
   vpc_id       = aws_vpc.main.id
-  service_name = "com.amazonaws.${data.aws_region.current.name}.s3"
+  service_name = "com.amazonaws.${data.aws_region.current.id}.s3"
 
   vpc_endpoint_type = "Gateway"
   route_table_ids   = [aws_route_table.private.id]
@@ -141,7 +141,7 @@ resource "aws_vpc_endpoint" "s3" {
 
 resource "aws_security_group" "msk" {
   name_prefix = "datalake-msk-${var.environment}-"
-  description = "MSK broker security group — allows Kafka IAM auth from EKS nodes"
+  description = "MSK broker security group - allows Kafka IAM auth from EKS nodes"
   vpc_id      = aws_vpc.main.id
 
   tags = merge(local.common_tags, {
@@ -201,7 +201,7 @@ resource "aws_vpc_security_group_egress_rule" "msk_all_outbound" {
 
 resource "aws_security_group" "eks_node" {
   name_prefix = "datalake-eks-node-${var.environment}-"
-  description = "EKS worker node security group — outbound to MSK and S3"
+  description = "EKS worker node security group - outbound to MSK and S3"
   vpc_id      = aws_vpc.main.id
 
   tags = merge(local.common_tags, {

@@ -25,18 +25,20 @@ locals {
       # Audit retention
       audit_retention_days = 90
 
-      # EKS (not used in dev — Kind cluster locally)
-      enable_eks             = false
-      eks_node_instance_type = "t3.medium"
-      eks_node_count         = 2
-
       # Aurora (not used in dev — local Postgres in Kind)
       enable_aurora          = false
       aurora_instance_class  = "db.t4g.medium"
       aurora_instance_count  = 1
 
+      # MSK (not used in dev — Strimzi Kafka locally in Kind)
+      enable_msk = false
+
       # MSK Connect (not used in dev — Strimzi Kafka Connect locally)
       enable_msk_connect = false
+
+      # Glue ETL
+      enable_glue_etl  = true
+      glue_worker_count = 2
     }
 
     prod = {
@@ -58,18 +60,20 @@ locals {
       # Audit retention — 5 years per SEC Rule 204-2
       audit_retention_days = 1825
 
-      # EKS
-      enable_eks             = true
-      eks_node_instance_type = "m5.large"
-      eks_node_count         = 3
-
       # Aurora PostgreSQL
       enable_aurora          = true
       aurora_instance_class  = "db.r6g.large"
       aurora_instance_count  = 2
 
+      # MSK
+      enable_msk = true
+
       # MSK Connect
       enable_msk_connect = true
+
+      # Glue ETL
+      enable_glue_etl   = true
+      glue_worker_count = 5
     }
   }
 

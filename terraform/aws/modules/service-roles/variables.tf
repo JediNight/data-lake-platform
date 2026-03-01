@@ -59,6 +59,27 @@ variable "kafka_connect_service_account" {
   default     = "data-lake-connect"
 }
 
+variable "mnpi_kms_key_arn" {
+  description = "ARN of the KMS CMK for MNPI zone encryption"
+  type        = string
+}
+
+variable "nonmnpi_kms_key_arn" {
+  description = "ARN of the KMS CMK for non-MNPI zone encryption"
+  type        = string
+}
+
+variable "query_results_bucket_arn" {
+  description = "ARN of the query results bucket (used for Glue ETL scripts)"
+  type        = string
+}
+
+variable "extra_s3_read_bucket_arns" {
+  description = "Additional S3 bucket ARNs the Glue ETL role needs read access to (e.g. local Iceberg dev bucket)"
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Common tags for all resources"
   type        = map(string)
