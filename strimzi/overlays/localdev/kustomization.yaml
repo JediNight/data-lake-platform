@@ -21,3 +21,7 @@ patches:
     target:
       kind: KafkaConnect
       name: data-lake-connect
+  - path: kafka-connect-remove-build-patch.yaml
+    target:
+      kind: KafkaConnect
+      name: data-lake-connect
