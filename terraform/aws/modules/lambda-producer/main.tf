@@ -97,7 +97,7 @@ resource "aws_iam_role_policy" "msk" {
           "kafka-cluster:DescribeTopic",
           "kafka-cluster:CreateTopic",
         ]
-        Resource = "${var.msk_cluster_arn}/*"
+        Resource = "${replace(var.msk_cluster_arn, ":cluster/", ":topic/")}/*"
       },
     ]
   })

@@ -10,6 +10,7 @@ import os
 from aws_lambda_powertools import Logger, Tracer
 from aws_msk_iam_sasl_signer import MSKAuthTokenProvider
 from kafka import KafkaProducer
+from kafka.sasl.oauth import AbstractTokenProvider
 
 logger = Logger(child=True)
 tracer = Tracer()
@@ -17,17 +18,17 @@ tracer = Tracer()
 TOPIC_MARKET_DATA = "stream.market-data"
 
 
-class MSKTokenProvider:
+class MSKTokenProvider(AbstractTokenProvider):
     """OAUTHBEARER token provider for MSK IAM authentication.
 
-    kafka-python requires an object with a ``token()`` method that returns
-    ``(token_str, expiry_seconds)``.
+    Extends kafka-python's AbstractTokenProvider so the isinstance() check
+    in kafka.sasl.oauth passes at connection init.
     """
 
-    def token(self) -> tuple[str, float]:
+    def token(self) -> str:
         region = os.environ.get("AWS_REGION", "us-east-1")
-        auth_token, expiry_ms = MSKAuthTokenProvider.generate_auth_token(region)
-        return auth_token, expiry_ms / 1000
+        token, _ = MSKAuthTokenProvider.generate_auth_token(region)
+        return token
 
 
 class MSKProducer:

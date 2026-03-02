@@ -20,6 +20,16 @@ set -euo pipefail
 BUILD_DIR=".build"
 SRC_DIR="scripts/lambda/trading_simulator"
 
+# Use python3.11 pip if available, fall back to pip3
+if command -v python3.11 &>/dev/null; then
+  PIP="python3.11 -m pip"
+elif command -v pip3 &>/dev/null; then
+  PIP="pip3"
+else
+  echo "ERROR: Neither python3.11 nor pip3 found." >&2
+  exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # Validate source directory
 # ---------------------------------------------------------------------------
@@ -46,10 +56,12 @@ echo "Building Lambda Layer..."
 LAYER_DIR="$BUILD_DIR/layer/python/lib/python3.11/site-packages"
 mkdir -p "$LAYER_DIR"
 
-pip install \
+$PIP install \
   -r "$SRC_DIR/requirements.txt" \
   -t "$LAYER_DIR" \
   --platform manylinux2014_x86_64 \
+  --implementation cp \
+  --python-version 3.11 \
   --only-binary=:all: \
   --quiet
 
@@ -75,7 +87,7 @@ rm -f "$FUNCTION_ZIP"
 (
   cd "$SRC_DIR"
   zip -r -q \
-    "../../../../$FUNCTION_ZIP" \
+    "../../../$FUNCTION_ZIP" \
     . \
     --include "*.py" \
     --exclude "*.pyc" \
