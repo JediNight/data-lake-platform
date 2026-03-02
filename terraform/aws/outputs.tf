@@ -129,14 +129,19 @@ output "glue_etl_job_names" {
 }
 
 # -----------------------------------------------------------------------------
-# Lambda Producer API (prod only)
+# Lambda Trading Simulator (prod only)
 # -----------------------------------------------------------------------------
-output "lambda_api_endpoint" {
-  description = "Lambda producer API Gateway endpoint"
-  value       = local.c.enable_lambda_producer ? module.lambda_producer[0].api_endpoint : null
+output "lambda_producer_function_name" {
+  description = "Lambda trading simulator function name"
+  value       = local.c.enable_lambda_producer ? module.lambda_producer[0].function_name : null
 }
 
-output "lambda_function_name" {
-  description = "Lambda producer function name"
-  value       = local.c.enable_lambda_producer ? module.lambda_producer[0].function_name : null
+output "lambda_producer_function_arn" {
+  description = "Lambda trading simulator function ARN"
+  value       = local.c.enable_lambda_producer ? module.lambda_producer[0].function_arn : null
+}
+
+output "lambda_producer_schedule_rule" {
+  description = "EventBridge schedule rule name"
+  value       = local.c.enable_lambda_producer ? module.lambda_producer[0].eventbridge_rule_name : null
 }

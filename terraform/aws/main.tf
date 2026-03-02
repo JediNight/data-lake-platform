@@ -166,13 +166,13 @@ module "analytics" {
 # =============================================================================
 
 module "observability" {
-  source             = "./modules/observability"
-  environment        = local.env
-  account_id         = data.aws_caller_identity.current.account_id
-  mnpi_bucket_arn    = module.data_lake_storage.mnpi_bucket_arn
-  nonmnpi_bucket_arn = module.data_lake_storage.nonmnpi_bucket_arn
-  audit_bucket_arn   = module.data_lake_storage.audit_bucket_arn
-  audit_bucket_id    = module.data_lake_storage.audit_bucket_id
+  source                   = "./modules/observability"
+  environment              = local.env
+  account_id               = data.aws_caller_identity.current.account_id
+  mnpi_bucket_arn          = module.data_lake_storage.mnpi_bucket_arn
+  nonmnpi_bucket_arn       = module.data_lake_storage.nonmnpi_bucket_arn
+  audit_bucket_arn         = module.data_lake_storage.audit_bucket_arn
+  audit_bucket_id          = module.data_lake_storage.audit_bucket_id
   log_retention_days       = local.c.audit_retention_days
   enable_quicksight        = local.c.enable_quicksight
   query_results_bucket_arn = module.data_lake_storage.query_results_bucket_arn
@@ -242,7 +242,7 @@ module "msk_connect" {
 }
 
 # =============================================================================
-# Lambda Producer API (prod only — FastAPI on Lambda + API Gateway)
+# Lambda Trading Simulator (prod only — EventBridge → Lambda → Aurora + MSK)
 # =============================================================================
 
 module "lambda_producer" {
@@ -254,16 +254,12 @@ module "lambda_producer" {
   lambda_security_group_id = module.networking.lambda_security_group_id
   msk_cluster_arn          = module.streaming[0].cluster_arn
   msk_bootstrap_brokers    = module.streaming[0].bootstrap_brokers_iam
+  aurora_cluster_arn       = module.aurora_postgres[0].cluster_arn
   aurora_secret_arn        = module.aurora_postgres[0].master_password_secret_arn
 
-  postgres_dsn = format("postgresql://%s:%s@%s:%s/trading",
-    "postgres",
-    "PLACEHOLDER",
-    module.aurora_postgres[0].cluster_endpoint,
-    module.aurora_postgres[0].cluster_port,
-  )
+  function_zip_path = "${path.module}/../../.build/trading-simulator.zip"
+  layer_zip_path    = "${path.module}/../../.build/trading-simulator-layer.zip"
 
-  lambda_zip_path = "${path.module}/../../.build/lambda-producer.zip"
-
-  tags = {}
+  schedule_enabled = true
+  tags             = {}
 }

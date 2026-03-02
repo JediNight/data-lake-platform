@@ -68,3 +68,8 @@ output "s3_endpoint_id" {
   description = "ID of the S3 VPC gateway endpoint"
   value       = aws_vpc_endpoint.s3.id
 }
+
+output "vpc_endpoints_security_group_id" {
+  description = "Security group ID for VPC Interface Endpoints"
+  value       = aws_security_group.vpc_endpoints.id
+}

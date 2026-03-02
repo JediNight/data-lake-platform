@@ -215,6 +215,52 @@ resource "aws_vpc_endpoint" "s3" {
   })
 }
 
+# --- VPC Interface Endpoints Security Group --------------------------------
+
+resource "aws_security_group" "vpc_endpoints" {
+  name_prefix = "datalake-vpce-${var.environment}-"
+  description = "VPC Interface Endpoints - HTTPS from Lambda"
+  vpc_id      = aws_vpc.main.id
+
+  tags = merge(local.common_tags, {
+    Name = "datalake-vpce-sg-${var.environment}"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "vpce_from_lambda" {
+  security_group_id            = aws_security_group.vpc_endpoints.id
+  description                  = "HTTPS (443) from Lambda functions"
+  from_port                    = 443
+  to_port                      = 443
+  ip_protocol                  = "tcp"
+  referenced_security_group_id = aws_security_group.lambda.id
+
+  tags = merge(local.common_tags, {
+    Name = "vpce-ingress-from-lambda"
+  })
+}
+
+# --- STS VPC Interface Endpoint -------------------------------------------
+# Required for Lambda to generate MSK IAM auth tokens (sts:AssumeRole)
+# without depending on NAT Gateway. Cost: ~$7.30/month (2 ENIs).
+
+resource "aws_vpc_endpoint" "sts" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${data.aws_region.current.id}.sts"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+
+  tags = merge(local.common_tags, {
+    Name = "datalake-sts-endpoint-${var.environment}"
+  })
+}
+
 # =============================================================================
 # Security Groups
 # =============================================================================
