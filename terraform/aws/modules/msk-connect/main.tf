@@ -6,12 +6,15 @@
  * 2. Iceberg S3 sink — writes CDC + streaming topics to S3 as Iceberg tables
  *
  * Uses AWS-managed connector infrastructure (no self-hosted Kafka Connect).
+ *
+ * Iceberg sinks are driven by `local.iceberg_sinks` — a config map keyed by
+ * data zone (mnpi / nonmnpi).  Add a new zone by adding a key to the map;
+ * all shared connector plumbing (plugin, worker config, VPC, IAM, logging)
+ * is applied via a single `for_each` resource.
  */
 
 # =============================================================================
-# Custom Plugins
-# Plugin JARs/ZIPs are uploaded out-of-band via scripts/upload-connector-plugins.sh.
-# We only manage the S3 bucket and MSK Connect plugin resources here.
+# Data Sources
 # =============================================================================
 
 data "aws_caller_identity" "current" {}
@@ -22,6 +25,31 @@ data "aws_secretsmanager_secret_version" "aurora" {
   count     = var.enable_debezium_connector ? 1 : 0
   secret_id = var.aurora_secret_arn
 }
+
+# =============================================================================
+# Locals — Iceberg Sink Config Map
+# =============================================================================
+
+locals {
+  iceberg_sinks = {
+    mnpi = {
+      topics     = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions"
+      bucket_arn = var.mnpi_bucket_arn
+      tables     = "raw_mnpi_${var.environment}.orders,raw_mnpi_${var.environment}.trades,raw_mnpi_${var.environment}.positions"
+    }
+    nonmnpi = {
+      topics     = "cdc.trading.accounts,cdc.trading.instruments,stream.market-data"
+      bucket_arn = var.nonmnpi_bucket_arn
+      tables     = "raw_nonmnpi_${var.environment}.accounts,raw_nonmnpi_${var.environment}.instruments,raw_nonmnpi_${var.environment}.market_data"
+    }
+  }
+}
+
+# =============================================================================
+# Custom Plugins
+# Plugin JARs/ZIPs are uploaded out-of-band via scripts/upload-connector-plugins.sh.
+# We only manage the S3 bucket and MSK Connect plugin resources here.
+# =============================================================================
 
 resource "aws_s3_bucket" "plugins" {
   bucket        = "datalake-msk-connect-plugins-${data.aws_caller_identity.current.account_id}-${var.environment}"
@@ -99,14 +127,14 @@ resource "aws_mskconnect_connector" "debezium_source" {
     "database.sslmode"  = "require" # Aurora PG 15 enforces SSL
 
     # PostgreSQL logical replication
-    "plugin.name"                = "pgoutput"
-    "publication.name"           = "debezium_publication"
+    "plugin.name"                 = "pgoutput"
+    "publication.name"            = "debezium_publication"
     "publication.autocreate.mode" = "disabled" # Publication created by init-aurora-cdc.sh
-    "slot.name"                  = "debezium_slot"
+    "slot.name"                   = "debezium_slot"
 
     # Topic configuration
-    "topic.prefix"        = "cdc.trading"
-    "table.include.list"  = "public.orders,public.trades,public.positions,public.accounts,public.instruments"
+    "topic.prefix"       = "cdc.trading"
+    "table.include.list" = "public.orders,public.trades,public.positions,public.accounts,public.instruments"
 
     # Converters
     "key.converter"                  = "org.apache.kafka.connect.json.JsonConverter"
@@ -168,11 +196,13 @@ resource "aws_mskconnect_connector" "debezium_source" {
 }
 
 # =============================================================================
-# Iceberg S3 Sink Connector (MNPI topics)
+# Iceberg S3 Sink Connectors (one per data zone via for_each)
 # =============================================================================
 
-resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
-  name = "iceberg-sink-mnpi-${var.environment}"
+resource "aws_mskconnect_connector" "iceberg_sink" {
+  for_each = local.iceberg_sinks
+
+  name = "iceberg-sink-${each.key}-${var.environment}"
 
   kafkaconnect_version = "3.7.x"
 
@@ -186,85 +216,11 @@ resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
   connector_configuration = {
     "connector.class"                    = "org.apache.iceberg.connect.IcebergSinkConnector"
     "tasks.max"                          = "1"
-    "topics"                             = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions"
+    "topics"                             = each.value.topics
     "iceberg.catalog.type"               = "glue"
-    "iceberg.catalog.warehouse"          = "s3://${replace(var.mnpi_bucket_arn, "arn:aws:s3:::", "")}"
+    "iceberg.catalog.warehouse"          = "s3://${replace(each.value.bucket_arn, "arn:aws:s3:::", "")}"
     "iceberg.catalog.io-impl"            = "org.apache.iceberg.aws.s3.S3FileIO"
-    "iceberg.tables"                     = "raw_mnpi_${var.environment}.orders,raw_mnpi_${var.environment}.trades,raw_mnpi_${var.environment}.positions"
-    "iceberg.tables.auto-create-enabled" = "true"
-    "iceberg.tables.upsert-mode-enabled" = "false"
-    "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
-    "value.converter"                    = "org.apache.kafka.connect.json.JsonConverter"
-    "key.converter.schemas.enable"       = "false"
-    "value.converter.schemas.enable"     = "true"
-  }
-
-  kafka_cluster {
-    apache_kafka_cluster {
-      bootstrap_servers = var.msk_bootstrap_brokers
-      vpc {
-        subnets         = var.subnet_ids
-        security_groups = var.security_group_ids
-      }
-    }
-  }
-
-  kafka_cluster_client_authentication {
-    authentication_type = "IAM"
-  }
-
-  kafka_cluster_encryption_in_transit {
-    encryption_type = "TLS"
-  }
-
-  plugin {
-    custom_plugin {
-      arn      = aws_mskconnect_custom_plugin.iceberg_sink.arn
-      revision = aws_mskconnect_custom_plugin.iceberg_sink.latest_revision
-    }
-  }
-
-  worker_configuration {
-    arn      = aws_mskconnect_worker_configuration.this.arn
-    revision = aws_mskconnect_worker_configuration.this.latest_revision
-  }
-
-  service_execution_role_arn = var.kafka_connect_role_arn
-
-  log_delivery {
-    worker_log_delivery {
-      cloudwatch_logs {
-        enabled   = true
-        log_group = aws_cloudwatch_log_group.connector_logs.name
-      }
-    }
-  }
-}
-
-# =============================================================================
-# Iceberg S3 Sink Connector (non-MNPI topics)
-# =============================================================================
-
-resource "aws_mskconnect_connector" "iceberg_sink_nonmnpi" {
-  name = "iceberg-sink-nonmnpi-${var.environment}"
-
-  kafkaconnect_version = "3.7.x"
-
-  capacity {
-    provisioned_capacity {
-      mcu_count    = 1
-      worker_count = 1
-    }
-  }
-
-  connector_configuration = {
-    "connector.class"                    = "org.apache.iceberg.connect.IcebergSinkConnector"
-    "tasks.max"                          = "1"
-    "topics"                             = "cdc.trading.accounts,cdc.trading.instruments,stream.market-data"
-    "iceberg.catalog.type"               = "glue"
-    "iceberg.catalog.warehouse"          = "s3://${replace(var.nonmnpi_bucket_arn, "arn:aws:s3:::", "")}"
-    "iceberg.catalog.io-impl"            = "org.apache.iceberg.aws.s3.S3FileIO"
-    "iceberg.tables"                     = "raw_nonmnpi_${var.environment}.accounts,raw_nonmnpi_${var.environment}.instruments,raw_nonmnpi_${var.environment}.market_data"
+    "iceberg.tables"                     = each.value.tables
     "iceberg.tables.auto-create-enabled" = "true"
     "iceberg.tables.upsert-mode-enabled" = "false"
     "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
