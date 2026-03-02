@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
-  name: sample-postgres
+  name: strimzi-connect
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
@@ -12,21 +12,30 @@ spec:
     - list:
         elements:
           - cluster: localdev
+          # - cluster: prod  # Uncomment when deploying to a real EKS cluster
   template:
     metadata:
-      name: 'sample-postgres-{{ .cluster }}'
+      name: 'strimzi-connect-{{ .cluster }}'
     spec:
       project: default
       source:
         repoURL: file:///mnt/data-lake-platform
         targetRevision: HEAD
-        path: 'sample-postgres/overlays/{{ .cluster }}'
+        path: 'gitops/strimzi/overlays/{{ .cluster }}'
       destination:
         server: https://kubernetes.default.svc
-        namespace: data
+        namespace: strimzi
       syncPolicy:
         automated:
           prune: true
           selfHeal: true
         syncOptions:
           - CreateNamespace=true
+          - SkipDryRunOnMissingResource=true
+          - ServerSideApply=true
+        retry:
+          limit: 10
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 5m

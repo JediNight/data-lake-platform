@@ -12,8 +12,8 @@ print("""
 # File Watchers (ArgoCD syncs on commit, Tilt watches for awareness)
 # ==========================================================================
 
-watch_file('strimzi/')
-watch_file('sample-postgres/')
+watch_file('gitops/strimzi/')
+watch_file('gitops/sample-postgres/')
 watch_file('producer-api/')
 watch_file('appset-management.yaml')
 

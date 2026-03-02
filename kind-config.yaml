@@ -1,5 +1,7 @@
 # Kind Cluster Configuration for data-lake-platform
-# Mirrors iac-local pattern: Terraform bootstraps Kind + ArgoCD
+# Reference template — the actual cluster is created by terraform/local/main.tf.
+# Uses envsubst variables: PROJECT_ROOT (repo root) and HOME (user home).
+# Usage: PROJECT_ROOT=$(pwd) envsubst < kind-config.yaml | kind create cluster --config -
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: data-lake
@@ -18,7 +20,7 @@ nodes:
         hostPort: 8080
         protocol: TCP
     extraMounts:
-      - hostPath: /Users/toksfawibe/Documents/claude-agent-workspace/data-lake-platform
+      - hostPath: ${PROJECT_ROOT}
         containerPath: /mnt/data-lake-platform
         readOnly: true
 
@@ -26,10 +28,10 @@ nodes:
     labels:
       workload: applications
     extraMounts:
-      - hostPath: /Users/toksfawibe/Documents/claude-agent-workspace/data-lake-platform
+      - hostPath: ${PROJECT_ROOT}
         containerPath: /mnt/data-lake-platform
         readOnly: true
-      - hostPath: /Users/toksfawibe/.aws
+      - hostPath: ${HOME}/.aws
         containerPath: /mnt/aws
         readOnly: true
 

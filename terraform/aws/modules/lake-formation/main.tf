@@ -95,6 +95,13 @@ resource "aws_lakeformation_data_lake_settings" "this" {
 resource "aws_lakeformation_identity_center_configuration" "this" {
   instance_arn = var.sso_instance_arn
 
+  # NOTE: The console-configured "AWS account and organization IDs" (ShareRecipients)
+  # are NOT managed here because the Terraform provider has not implemented the
+  # share_recipients attribute yet (hashicorp/terraform-provider-aws#44866).
+  # Current recipients (configured via console):
+  #   - Account: 445985103066
+  # This is a single-account deployment; cross-account RAM sharing is not used.
+
   depends_on = [
     aws_lakeformation_data_lake_settings.this,
   ]

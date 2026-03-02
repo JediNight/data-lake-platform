@@ -41,7 +41,7 @@ resource "kind_cluster" "this" {
       }
 
       extra_mounts {
-        host_path      = var.project_path
+        host_path      = local.project_path
         container_path = "/mnt/data-lake-platform"
         read_only      = true
       }
@@ -56,7 +56,7 @@ resource "kind_cluster" "this" {
       }
 
       extra_mounts {
-        host_path      = var.project_path
+        host_path      = local.project_path
         container_path = "/mnt/data-lake-platform"
         read_only      = true
       }
@@ -160,5 +160,5 @@ resource "kubectl_manifest" "appset_management" {
 }
 
 # Strimzi operator, strimzi namespace, and data namespace are all managed by
-# ArgoCD via ApplicationSets with sync waves (see strimzi-operator/ directory).
+# ArgoCD via ApplicationSets with sync waves (see gitops/strimzi-operator/).
 # Terraform only bootstraps: Kind cluster + ArgoCD + root Application.

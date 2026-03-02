@@ -1,204 +1,158 @@
 # Data Lake Platform
 
-Secure, auditable AWS Data Lake with MNPI/non-MNPI isolation for an asset management firm.
+Secure, auditable AWS data lake with MNPI/non-MNPI isolation for an asset management firm.
 
-Real-time CDC and streaming ingestion into Apache Iceberg tables on S3, queryable via Athena with Lake Formation attribute-based access control (ABAC).
+Real-time CDC and streaming ingestion into Apache Iceberg tables on S3, with Lake Formation attribute-based access control (ABAC) and a medallion architecture powered by Glue ETL.
 
-## What This Demonstrates
+![Architecture Diagram](generated-diagrams/data-lake-architecture.png)
+
+## Key Capabilities
 
 | Capability | Implementation |
 |---|---|
-| **CDC Pipeline** | PostgreSQL -> Debezium -> Kafka -> Iceberg Sink -> S3 (Iceberg v2) |
-| **Streaming Ingestion** | FastAPI trading simulator -> Kafka -> Iceberg Sink -> S3 |
-| **MNPI Isolation** | Separate S3 buckets, KMS keys, Kafka topics, Glue databases |
-| **Lake Formation ABAC** | LF-Tags (sensitivity + layer) grant access per Identity Center group |
-| **Iceberg Format** | Schema evolution, snapshot history, time-travel, Parquet data files |
-| **Medallion Architecture** | Raw (append-only CDC) -> Curated (MERGE INTO) -> Analytics (CTAS aggregates) |
-| **Infrastructure as Code** | 10 Terraform modules, workspace-driven dev/prod, GitOps via ArgoCD |
+| **CDC Pipeline** | Aurora PostgreSQL &rarr; Debezium (MSK Connect) &rarr; MSK &rarr; Iceberg Sink &rarr; S3 |
+| **Streaming Ingestion** | FastAPI producer &rarr; MSK &rarr; Iceberg Sink &rarr; S3 |
+| **MNPI Isolation** | Separate S3 buckets, KMS CMKs, Kafka topics, Glue databases per sensitivity zone |
+| **Lake Formation ABAC** | LF-Tags (`sensitivity` + `layer`) with grants per IAM Identity Center group |
+| **Medallion Transforms** | Glue PySpark jobs: Raw &rarr; Curated (dedup + type cast) &rarr; Analytics (aggregates) |
+| **Iceberg Tables** | Schema evolution, snapshot history, time-travel, Parquet data files |
+| **BI / Reporting** | 3 Athena workgroups + QuickSight data source (via Athena connector) |
+| **Infrastructure as Code** | 12 Terraform modules, workspace-driven dev/prod, ~200 resources |
 
-## Prerequisites
+## Architecture
 
-- [Terraform](https://terraform.io) >= 1.7.0
-- [Kind](https://kind.sigs.k8s.io/) >= 0.20
-- [Task](https://taskfile.dev/) >= 3.0
-- [kubectl](https://kubernetes.io/docs/tasks/tools/) >= 1.28
-- AWS CLI v2 with SSO configured (`aws sso login --profile data-lake`)
-- Python 3.11+ (for producer-api)
-
-## Quick Start
-
-```bash
-task up          # Bootstrap Kind + ArgoCD + deploy workloads
-task status      # Check all resources
-task down        # Tear down everything
-```
-
-## Demo Walkthrough
-
-### 1. Start the Local Pipeline
-
-```bash
-# Bootstrap Kind cluster with ArgoCD, Strimzi, and sample Postgres
-task infra
-
-# Watch ArgoCD sync all workloads
-kubectl -n argocd get applications -w
-
-# Verify the pipeline components are running
-task status
-```
-
-### 2. Generate Trading Data
-
-The producer-api generates simulated trading data (order events + market data ticks) and writes to Kafka:
-
-```bash
-# Check the producer pod is running
-kubectl -n data get pods -l app=producer-api
-
-# Tail producer logs to see data flowing
-kubectl -n data logs -f deployment/producer-api
-```
-
-Debezium captures CDC events from PostgreSQL, and both CDC + streaming events flow through Kafka into Iceberg tables on S3.
-
-### 3. Verify Data Landed in Iceberg
-
-```bash
-# Check Iceberg files in the local dev S3 bucket
-aws s3 ls s3://datalake-local-iceberg-dev/mnpi/default/mnpi_events/data/ \
-  --profile data-lake --recursive | head -5
-aws s3 ls s3://datalake-local-iceberg-dev/nonmnpi/default/nonmnpi_events/data/ \
-  --profile data-lake --recursive | head -5
-```
-
-### 4. Query with Athena
-
-The Iceberg tables are registered in AWS Glue and queryable via Athena engine v3.
-
-```sql
--- Count all MNPI order events
-SELECT count(*) AS total_rows FROM raw_mnpi_dev.mnpi_events;
--- Result: ~5,500 rows
-
--- Sample MNPI data (order book events)
-SELECT ticker, side, event_type, quantity, order_id, timestamp
-FROM raw_mnpi_dev.mnpi_events
-WHERE event_type = 'ORDER_CREATED'
-LIMIT 10;
-
--- Count non-MNPI market data ticks
-SELECT count(*) AS total_rows FROM raw_nonmnpi_dev.nonmnpi_events;
--- Result: ~1,100 rows
-
--- Price summary per ticker (non-MNPI public market data)
-SELECT
-    ticker,
-    count(*) AS tick_count,
-    min(CAST(bid AS double)) AS min_bid,
-    max(CAST(ask AS double)) AS max_ask,
-    round(avg(CAST(last_price AS double)), 2) AS avg_price
-FROM raw_nonmnpi_dev.nonmnpi_events
-GROUP BY ticker
-ORDER BY tick_count DESC;
-```
-
-Run queries via the AWS Console (Athena > Query Editor) using the `data-engineers-dev` workgroup, or via CLI:
-
-```bash
-aws athena start-query-execution \
-  --query-string "SELECT count(*) FROM raw_mnpi_dev.mnpi_events" \
-  --work-group data-engineers-dev \
-  --profile data-lake
-```
-
-### 5. Access Control (ABAC)
-
-Three Identity Center groups with different access levels:
+### Access Control Model (ABAC via Lake Formation)
 
 | Persona | Sensitivity | Layers | Permission |
 |---|---|---|---|
 | **Finance Analyst** | mnpi + non-mnpi | curated, analytics | SELECT |
 | **Data Analyst** | non-mnpi only | curated, analytics | SELECT |
-| **Data Engineer** | mnpi + non-mnpi | raw, curated, analytics | ALL + S3 |
+| **Data Engineer** | mnpi + non-mnpi | raw, curated, analytics | ALL + DATA_LOCATION_ACCESS |
 
-Data Analysts querying MNPI tables get `AccessDeniedException` from Lake Formation. See `scripts/validation/access_validation.sql` for test queries.
+Data Analysts querying MNPI tables receive `AccessDeniedException` from Lake Formation. Grants use LF-Tag expressions (AND across tag keys, OR within values) so new tables automatically inherit permissions.
 
-### 6. Medallion Layer Transforms
+### Medallion Layers
 
-```bash
-# Raw -> Curated (deduplicate CDC events to current state)
-# Run in Athena as data-engineer:
-cat scripts/01_curated/curated_orders.sql
-
-# Curated -> Analytics (pre-aggregated reports)
-cat scripts/02_analytics/analytics_trade_summary.sql
-```
-
-## Architecture
-
-See [Architecture Diagrams](docs/architecture-diagram.md) for Mermaid diagrams covering:
-- End-to-end data flow
-- MNPI/non-MNPI isolation boundary
-- Access control matrix (persona -> LF-Tags -> databases)
-- Terraform module dependency graph
-- Medallion layer detail
-
-Full design doc: [Architecture Design](docs/plans/2026-02-28-data-lake-platform-design.md)
+| Layer | MNPI Database | Non-MNPI Database | Description |
+|---|---|---|---|
+| **Raw** | `raw_mnpi_{env}` | `raw_nonmnpi_{env}` | Append-only CDC/streaming events |
+| **Curated** | `curated_mnpi_{env}` | `curated_nonmnpi_{env}` | Deduplicated, typed, enriched |
+| **Analytics** | `analytics_mnpi_{env}` | `analytics_nonmnpi_{env}` | Pre-aggregated summaries |
 
 ## Project Structure
 
 ```
-terraform/local/          Kind cluster + ArgoCD bootstrap (GitOps bridge)
-terraform/aws/            AWS infrastructure (10 modules, workspace-driven dev/prod)
+terraform/aws/              AWS infrastructure (12 modules, workspace-driven dev/prod)
   modules/
-    networking/           VPC, subnets, security groups, S3 gateway endpoint
-    data-lake-storage/    S3 buckets (MNPI + non-MNPI + audit + query-results), KMS
-    streaming/            MSK Provisioned (prod only)
-    glue-catalog/         6 Glue databases, schema registry
-    identity-center/      3 IC groups + permission sets + demo users
-    lake-formation/       LF-Tags, ABAC grants, S3 registrations
-    service-roles/        Kafka Connect IRSA role
-    analytics/            3 Athena workgroups + named queries
-    observability/        CloudTrail + audit logging
-    eks/                  EKS cluster (prod only)
-    aurora-postgres/      Aurora PostgreSQL (prod only)
-    msk-connect/          MSK Connect connectors (prod only)
-strimzi/                  Kafka + KafkaConnect + Debezium + Iceberg sinks (Kustomize)
-sample-postgres/          Source PostgreSQL for CDC demo (Kustomize)
-producer-api/             FastAPI trading simulator + Alpaca market data adapter
+    networking/              VPC, subnets, security groups, S3 gateway endpoint
+    data-lake-storage/       S3 buckets (MNPI + non-MNPI + audit + query-results), KMS CMKs
+    streaming/               MSK Provisioned cluster (2x m5.large brokers)
+    glue-catalog/            6 Glue databases across medallion layers
+    glue-etl/                4 PySpark jobs, workflow with conditional triggers
+    identity-center/         3 IAM IC groups + permission sets + demo users
+    lake-formation/          LF-Tags, tag-based ABAC grants, S3 registrations, IC integration
+    service-roles/           IAM roles (Kafka Connect, Glue ETL) with least-privilege policies
+    analytics/               3 Athena workgroups + named queries
+    observability/           CloudTrail, QuickSight data source, CloudWatch log groups
+    eks/                     EKS cluster for Strimzi (prod only)
+    aurora-postgres/         Aurora PostgreSQL (source DB for CDC)
+    msk-connect/             MSK Connect: Debezium source + 2 Iceberg sinks (for_each)
+terraform/local/             Kind cluster + ArgoCD bootstrap (local dev only)
+gitops/                      Kubernetes manifests for local dev (ArgoCD-managed)
+  strimzi/                   Kafka + KafkaConnect + connectors (Kustomize overlays)
+  strimzi-operator/          Strimzi operator Helm-based ApplicationSet
+  sample-postgres/           Source PostgreSQL for local CDC demo
+producer-api/                FastAPI trading simulator + Alpaca market data adapter
 scripts/
-  00_seed/                Initial data seeding
-  01_curated/             Raw -> Curated MERGE INTO transforms
-  02_analytics/           Curated -> Analytics CTAS aggregates
-  integration/            Local integration test suite
-  validation/             Access control + Iceberg time-travel validation queries
-docs/                     Architecture diagrams and design plans
+  glue/                      PySpark ETL scripts (uploaded to S3 by Terraform)
+  01_curated/                Athena SQL proving curated transforms
+  02_analytics/              Athena SQL proving analytics transforms
+  validation/                Access control + Iceberg time-travel validation queries
+  upload-connector-plugins.sh  Download + package Debezium & Iceberg connector JARs
+docs/                        Architecture diagrams and design documents
 ```
 
-## AWS Infrastructure (dev environment)
+## Production Deployment
 
-The `dev` workspace deploys ~90 resources:
+### Prerequisites
+
+- Terraform >= 1.7.0
+- AWS CLI v2 with SSO configured (`aws sso login --profile data-lake`)
+- Python 3.11+ (for producer-api tests)
+
+### Deploy
+
+```bash
+# Authenticate
+aws sso login --profile data-lake
+
+# Initialize and select workspace
+task aws:init TF_WORKSPACE=prod
+
+# Review the plan (~200 resources)
+task aws:plan TF_WORKSPACE=prod
+
+# Apply
+task aws:apply TF_WORKSPACE=prod
+```
+
+### Post-Deploy Steps
+
+```bash
+# 1. Upload MSK Connect plugin JARs (one-time)
+scripts/upload-connector-plugins.sh prod
+
+# 2. Initialize Aurora CDC (replication slot + publication)
+scripts/init-aurora-cdc.sh prod
+
+# 3. Enable Debezium connector (set enable_debezium_connector = true, re-apply)
+task aws:apply TF_WORKSPACE=prod
+
+# 4. Run Glue medallion workflow
+AWS_PROFILE=data-lake aws glue start-workflow-run --name datalake-medallion-prod
+
+# 5. Verify data flow
+task athena:query QUERY="SELECT count(*) FROM raw_mnpi_prod.mnpi_events" WORKGROUP=data-engineers-prod
+```
+
+### Terraform Modules
 
 | Module | Resources | Key Outputs |
 |---|---|---|
-| networking | VPC, 2 private subnets, S3 endpoint | `vpc_id`, `private_subnet_ids` |
-| data-lake-storage | 4 S3 buckets, 2 KMS CMKs | `mnpi_bucket_id`, `nonmnpi_bucket_id` |
-| glue-catalog | 6 databases, schema registry | `database_names`, `registry_arn` |
-| identity-center | 3 groups, permission sets | `*_group_id` |
-| lake-formation | 2 LF-Tags, 8 grants, 2 S3 registrations | LF admin configured |
+| networking | VPC, 2 private subnets, S3 endpoint, SGs | `vpc_id`, `private_subnet_ids` |
+| data-lake-storage | 4 S3 buckets, 2 KMS CMKs, DENY bucket policies | `mnpi_bucket_id`, KMS ARNs |
+| streaming | MSK cluster (2x m5.large, IAM auth, TLS) | `bootstrap_brokers` |
+| glue-catalog | 6 databases, schema registry | `database_names` |
+| glue-etl | 4 PySpark jobs, workflow, conditional triggers | `workflow_name`, `job_names` |
+| identity-center | 3 groups, 3 permission sets | `*_group_id` |
+| lake-formation | 2 LF-Tags, 14 grants, 2 S3 registrations, IC config | LF admin configured |
+| service-roles | Kafka Connect + Glue ETL IAM roles | `*_role_arn` |
 | analytics | 3 Athena workgroups | `workgroup_names` |
-| observability | CloudTrail, audit bucket | `cloudtrail_arn` |
+| observability | CloudTrail, QuickSight, CloudWatch | `cloudtrail_arn` |
+| aurora-postgres | Aurora PG 15, Secrets Manager | `cluster_endpoint` |
+| msk-connect | Debezium source + 2 Iceberg sinks | `connector_arns` |
 
-MSK, EKS, Aurora, and MSK Connect are enabled in `prod` only.
+### Security Highlights
+
+- **S3 DENY bucket policies** block all `s3:GetObject`/`s3:PutObject` except Lake Formation SLR and explicitly allowed IAM roles
+- **KMS CMK per sensitivity zone** — MNPI and non-MNPI data encrypted with separate keys
+- **MSK IAM auth + TLS** — no plaintext Kafka traffic, IAM-based ACLs
+- **Lake Formation overrides IAM** — removing default `IAMAllowedPrincipals` forces all access through LF grants
+- **Secrets Manager** for Aurora credentials (not in Terraform state)
+- **CloudTrail** audit logging to dedicated S3 bucket
+
+## Local Development
+
+For local development with Kind + ArgoCD (optional — not required for prod):
 
 ```bash
-# Deploy AWS dev infrastructure
-aws sso login --profile data-lake
-task aws:init
-task aws:plan
-task aws:apply
+# Prerequisites: Kind, Task, kubectl
+task up          # Bootstrap Kind + ArgoCD + deploy workloads
+task status      # Check all resources
+task down        # Tear down everything
 ```
+
+See `terraform/local/` for the GitOps bridge pattern and `gitops/` for Kubernetes manifests.
 
 ## Testing
 
@@ -208,3 +162,8 @@ task alpaca:test        # Alpaca adapter transform tests (8 tests)
 task test:integration   # Local pipeline integration tests
 task validate:tf        # Terraform validate (local + AWS)
 ```
+
+## Design Documents
+
+- [Architecture Diagrams](docs/architecture-diagram.md) — Mermaid diagrams (data flow, isolation boundary, access matrix)
+- [Platform Design](docs/plans/2026-02-28-data-lake-platform-design.md) — Full architecture design document

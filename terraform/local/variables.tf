@@ -29,9 +29,13 @@ variable "kind_node_image" {
 }
 
 variable "project_path" {
-  description = "Absolute path to data-lake-platform directory (mounted into Kind nodes)"
+  description = "Absolute path to data-lake-platform repo root (mounted into Kind nodes)"
   type        = string
-  default     = "/Users/toksfawibe/Documents/claude-agent-workspace/data-lake-platform"
+  default     = null # Auto-detected from Terraform working directory
+}
+
+locals {
+  project_path = coalesce(var.project_path, abspath("${path.module}/../.."))
 }
 
 variable "sops_age_key_file" {
