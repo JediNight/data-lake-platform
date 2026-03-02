@@ -75,63 +75,47 @@ Each layer is replicated across MNPI and non-MNPI zones, yielding 6 Glue Catalog
 ### Project Structure
 
 ```
-data-lake-platform/
-├── Taskfile.yml                         # Lifecycle tasks (up, down, status, aws:*)
-├── Tiltfile                             # Local dev loop (Kind + ArgoCD + Tilt)
-├── kind-config.yaml                     # Kind cluster: 1 CP + 1 worker
-├── appset-management.yaml               # ArgoCD root ApplicationSet
-├── .sops.yaml                           # Age encryption config
+data-lake-platform/                        (main branch — production)
+├── Taskfile.yml                           # AWS deploy + Athena query tasks
 │
-├── terraform/
-│   ├── local/                           # Kind + ArgoCD bootstrap
-│   └── aws/
-│       ├── main.tf                      # Root module (AWS provider ~> 6.0)
-│       ├── locals.tf                    # Per-environment config (dev | prod)
-│       ├── backend.tf                   # S3 state backend (native S3 locking)
-│       ├── dev.tfvars / prod.tfvars     # Environment-specific variable overrides
-│       └── modules/
-│           ├── networking/              # VPC, subnets, NAT GW, S3 + STS endpoints, SGs
-│           ├── data-lake-storage/       # 4 S3 buckets, 2 KMS CMKs, DENY policies
-│           ├── streaming/               # MSK Provisioned cluster
-│           ├── glue-catalog/            # 6 Glue databases, schema registry
-│           ├── glue-etl/                # 4 PySpark jobs, medallion workflow, triggers
-│           ├── identity-center/         # 3 IC groups, permission sets, demo users
-│           ├── service-roles/           # IAM roles: Kafka Connect, Glue ETL, Lambda
-│           ├── lake-formation/          # LF-Tags, ABAC grants, S3 registrations
-│           ├── analytics/               # 3 Athena workgroups, named queries
-│           ├── observability/           # CloudTrail, QuickSight, CloudWatch
-│           ├── aurora-postgres/         # Aurora PG 15 cluster (prod only)
-│           ├── msk-connect/             # Debezium source + 2 Iceberg sinks (prod only)
-│           ├── lambda-producer/         # Trading simulator Lambda + EventBridge (prod only)
-│           └── local-dev-storage/       # S3 bucket for local Iceberg data (dev only)
-│
-├── gitops/                              # Kubernetes manifests (ArgoCD-managed)
-│   ├── strimzi/                         # KafkaConnect + connectors (local dev)
-│   ├── sample-postgres/                 # PostgreSQL StatefulSet (local dev)
-│   └── strimzi-operator/               # Strimzi Helm chart
-│
-├── producer-api/                        # FastAPI trading simulator (local dev)
-│   ├── app/                             # Main application code
-│   ├── alpaca_adapter/                  # Alpaca market data adapter
-│   └── tests/                           # 28 unit tests
+├── terraform/aws/
+│   ├── main.tf                            # Root module (AWS provider ~> 5.0)
+│   ├── locals.tf                          # Per-environment config (dev | prod)
+│   ├── backend.tf                         # S3 state backend (native S3 locking)
+│   ├── dev.tfvars / prod.tfvars           # Environment-specific variable overrides
+│   └── modules/
+│       ├── networking/                    # VPC, subnets, NAT GW, S3 + STS endpoints, SGs
+│       ├── data-lake-storage/             # 4 S3 buckets, 2 KMS CMKs, DENY policies
+│       ├── streaming/                     # MSK Provisioned cluster
+│       ├── glue-catalog/                  # 6 Glue databases, schema registry
+│       ├── glue-etl/                      # 4 PySpark jobs, medallion workflow, triggers
+│       ├── identity-center/               # 3 IC groups, permission sets, demo users
+│       ├── service-roles/                 # IAM roles: Kafka Connect, Glue ETL, Lambda
+│       ├── lake-formation/                # LF-Tags, ABAC grants, S3 registrations
+│       ├── analytics/                     # 3 Athena workgroups, named queries
+│       ├── observability/                 # CloudTrail, QuickSight, CloudWatch
+│       ├── aurora-postgres/               # Aurora PG 15 cluster (prod only)
+│       ├── msk-connect/                   # Debezium source + 2 Iceberg sinks (prod only)
+│       ├── lambda-producer/               # Trading simulator Lambda + EventBridge (prod only)
+│       └── local-dev-storage/             # S3 bucket for local Iceberg data (dev only)
 │
 ├── scripts/
-│   ├── lambda/trading_simulator/        # Lambda source code (prod)
-│   ├── glue/                            # 4 PySpark ETL scripts
-│   ├── 00_seed/                         # Database seeding SQL
-│   ├── 01_curated/                      # Athena SQL curated transforms (dev validation)
-│   ├── 02_analytics/                    # Athena SQL analytics transforms (dev validation)
-│   ├── validation/                      # Access control + Iceberg time-travel queries
-│   ├── init-aurora-cdc.sh               # Aurora CDC setup (replication slot, publication)
-│   ├── upload-connector-plugins.sh      # Download + repackage connector JARs as ZIPs
-│   └── build_lambda.sh                  # Build Lambda deployment artifacts
+│   ├── lambda/trading_simulator/          # Lambda source code (prod)
+│   ├── glue/                              # 4 PySpark ETL scripts
+│   ├── 00_seed/                           # Database seeding SQL
+│   ├── 01_curated/                        # Athena SQL curated transforms (dev validation)
+│   ├── 02_analytics/                      # Athena SQL analytics transforms (dev validation)
+│   ├── validation/                        # Access control + Iceberg time-travel queries
+│   ├── init-aurora-cdc.sh                 # Aurora CDC setup (replication slot, publication)
+│   ├── upload-connector-plugins.sh        # Download + repackage connector JARs as ZIPs
+│   └── build_lambda.sh                    # Build Lambda deployment artifacts
 │
-├── docs/
-│   ├── plans/                           # Design and implementation documents
-│   └── documentation.md                 # This file
-│
-└── tests/                               # Unit + Alpaca adapter tests (36 total)
+└── docs/
+    ├── plans/                             # Design and implementation documents
+    └── documentation.md                   # This file
 ```
+
+> **Local development code** (Kind cluster, ArgoCD, Strimzi Kafka Connect, FastAPI producer-api, Tiltfile, unit tests) lives on the [`dev`](../../tree/dev) branch. That branch validated the same CDC + Iceberg pipeline locally before deploying to AWS.
 
 ---
 
@@ -299,27 +283,9 @@ Audit logs: `s3://datalake-audit-{env}` with 5-year retention per SEC Rule 204-2
 - Terraform >= 1.7
 - S3 backend for Terraform state (`mayadangelou-datalake-tfstate`)
 
-### Local Development (Kind + ArgoCD + Tilt)
+### Local Development
 
-The local environment uses Kind for a Kubernetes cluster, ArgoCD for GitOps deployment, and Tilt for the dev loop. Kafka Connect runs via Strimzi, PostgreSQL via StatefulSet, and the producer-api via FastAPI.
-
-```bash
-task up                  # Full bootstrap: Kind + ArgoCD + Tilt
-task status              # Show all resource statuses
-task argocd:password     # Get ArgoCD admin password (UI at http://localhost:8080)
-task db:seed             # Seed sample financial data into PostgreSQL
-task db:shell            # Interactive psql session
-task down                # Tear down everything
-```
-
-**What gets deployed locally:**
-
-1. Kind cluster with ArgoCD
-2. Strimzi Kafka operator + local Kafka cluster
-3. PostgreSQL StatefulSet with trading schema (5 tables)
-4. Debezium source connector (CDC from PostgreSQL)
-5. Iceberg sink connectors (MNPI + non-MNPI)
-6. Producer API (FastAPI with trading simulator)
+Local development code lives on the `dev` branch. It uses Kind + ArgoCD + Tilt to run the full CDC + Iceberg pipeline locally with Strimzi Kafka Connect, a PostgreSQL StatefulSet, and a FastAPI trading simulator. See the `dev` branch README for setup instructions.
 
 ### AWS Deployment
 
@@ -468,14 +434,7 @@ The production trading simulator is an AWS Lambda function triggered by EventBri
 
 ### Local Development: Producer API
 
-**Source:** [`producer-api/`](../producer-api/)
-
-The local dev environment uses a FastAPI service with the same trading simulator logic, running as a Kubernetes pod managed by ArgoCD. It connects to local Strimzi Kafka and the Kind-hosted PostgreSQL.
-
-```bash
-task test:unit       # Run 28 unit tests
-task test:unit:quick # No coverage
-```
+The local dev environment (on the `dev` branch) uses a FastAPI service with the same trading simulator logic, running as a Kubernetes pod managed by ArgoCD. It connects to local Strimzi Kafka and the Kind-hosted PostgreSQL. See the `dev` branch for source code and 36 tests (28 unit + 8 Alpaca adapter).
 
 ---
 
