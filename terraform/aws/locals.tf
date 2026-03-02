@@ -73,7 +73,8 @@ locals {
       enable_msk = true
 
       # MSK Connect
-      enable_msk_connect = true
+      enable_msk_connect        = true
+      enable_debezium_connector = true
 
       # Lambda producer
       enable_lambda_producer = true

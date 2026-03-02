@@ -15,6 +15,13 @@
 # =============================================================================
 
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+# Read Aurora master password from Secrets Manager (for Debezium connector config)
+data "aws_secretsmanager_secret_version" "aurora" {
+  count     = var.enable_debezium_connector ? 1 : 0
+  secret_id = var.aurora_secret_arn
+}
 
 resource "aws_s3_bucket" "plugins" {
   bucket        = "datalake-msk-connect-plugins-${data.aws_caller_identity.current.account_id}-${var.environment}"
@@ -28,7 +35,7 @@ resource "aws_mskconnect_custom_plugin" "debezium" {
   location {
     s3 {
       bucket_arn = aws_s3_bucket.plugins.arn
-      file_key   = "debezium-postgres/debezium-connector-postgres-${var.debezium_version}-plugin.tar.gz"
+      file_key   = "debezium-postgres/debezium-connector-postgres-${var.debezium_version}-plugin.zip"
     }
   }
 }
@@ -79,22 +86,43 @@ resource "aws_mskconnect_connector" "debezium_source" {
   }
 
   connector_configuration = {
-    "connector.class"                = "io.debezium.connector.postgresql.PostgresConnector"
-    "tasks.max"                      = "1"
-    "database.hostname"              = var.postgres_endpoint
-    "database.port"                  = tostring(var.postgres_port)
-    "database.user"                  = "postgres"
-    "database.dbname"                = "trading"
-    "topic.prefix"                   = "cdc.trading"
-    "plugin.name"                    = "pgoutput"
-    "publication.name"               = "debezium_publication"
-    "slot.name"                      = "debezium_slot"
-    "table.include.list"             = "public.orders,public.trades,public.positions,public.accounts,public.instruments"
+    # Connector identity
+    "connector.class" = "io.debezium.connector.postgresql.PostgresConnector"
+    "tasks.max"       = "1"
+
+    # Database connection
+    "database.hostname" = var.postgres_endpoint
+    "database.port"     = tostring(var.postgres_port)
+    "database.user"     = "postgres"
+    "database.password" = jsondecode(data.aws_secretsmanager_secret_version.aurora[0].secret_string)["password"]
+    "database.dbname"   = "trading"
+    "database.sslmode"  = "require" # Aurora PG 15 enforces SSL
+
+    # PostgreSQL logical replication
+    "plugin.name"                = "pgoutput"
+    "publication.name"           = "debezium_publication"
+    "publication.autocreate.mode" = "disabled" # Publication created by init-aurora-cdc.sh
+    "slot.name"                  = "debezium_slot"
+
+    # Topic configuration
+    "topic.prefix"        = "cdc.trading"
+    "table.include.list"  = "public.orders,public.trades,public.positions,public.accounts,public.instruments"
+
+    # Converters
     "key.converter"                  = "org.apache.kafka.connect.json.JsonConverter"
     "value.converter"                = "org.apache.kafka.connect.json.JsonConverter"
     "key.converter.schemas.enable"   = "false"
     "value.converter.schemas.enable" = "true"
-    "database.password"              = "$${secretManager:datalake/aurora/${var.environment}/master-password}"
+
+    # Data handling
+    "decimal.handling.mode" = "string"
+    "snapshot.mode"         = "initial"
+
+    # Heartbeat — prevents WAL bloat on RDS (sends heartbeat every 5 min)
+    "heartbeat.interval.ms" = "300000"
+
+    # Error handling
+    "errors.log.enable" = "true"
   }
 
   kafka_cluster {

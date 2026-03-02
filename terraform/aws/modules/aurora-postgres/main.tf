@@ -62,8 +62,11 @@ resource "aws_secretsmanager_secret" "master_password" {
 }
 
 resource "aws_secretsmanager_secret_version" "master_password" {
-  secret_id     = aws_secretsmanager_secret.master_password.id
-  secret_string = random_password.master.result
+  secret_id = aws_secretsmanager_secret.master_password.id
+  secret_string = jsonencode({
+    username = var.master_username
+    password = random_password.master.result
+  })
 }
 
 # -----------------------------------------------------------------------------
@@ -85,9 +88,10 @@ resource "aws_rds_cluster" "this" {
   # Enable logical replication for Debezium CDC
   db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.this.name
 
-  storage_encrypted   = true
-  skip_final_snapshot = true
-  deletion_protection = var.environment == "prod" ? true : false
+  storage_encrypted    = true
+  enable_http_endpoint = true # RDS Data API — used for schema init without VPC access
+  skip_final_snapshot  = true
+  deletion_protection  = var.environment == "prod" ? true : false
 
   tags = {
     Name = "datalake-${var.environment}"

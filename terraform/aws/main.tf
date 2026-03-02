@@ -122,6 +122,9 @@ module "service_roles" {
     "arn:aws:s3:::datalake-local-iceberg-${local.env}",
   ]
 
+  # Aurora secret for Debezium CDC (Kafka Connect SecretsManagerConfigProvider)
+  aurora_secret_arn = local.c.enable_aurora ? module.aurora_postgres[0].master_password_secret_arn : ""
+
   # EKS removed — serverless architecture (Lambda + MSK Connect)
   eks_oidc_provider_arn = ""
   eks_oidc_provider_url = ""
@@ -170,8 +173,11 @@ module "observability" {
   nonmnpi_bucket_arn = module.data_lake_storage.nonmnpi_bucket_arn
   audit_bucket_arn   = module.data_lake_storage.audit_bucket_arn
   audit_bucket_id    = module.data_lake_storage.audit_bucket_id
-  log_retention_days = local.c.audit_retention_days
-  enable_quicksight  = local.c.enable_quicksight
+  log_retention_days       = local.c.audit_retention_days
+  enable_quicksight        = local.c.enable_quicksight
+  query_results_bucket_arn = module.data_lake_storage.query_results_bucket_arn
+  athena_workgroup_name    = "data-engineers-${local.env}"
+  quicksight_kms_key_arn   = module.data_lake_storage.nonmnpi_kms_key_arn
 }
 
 # =============================================================================
@@ -232,6 +238,7 @@ module "msk_connect" {
   enable_debezium_connector = try(local.c.enable_debezium_connector, false)
   postgres_endpoint         = local.c.enable_aurora ? module.aurora_postgres[0].cluster_endpoint : ""
   postgres_port             = local.c.enable_aurora ? module.aurora_postgres[0].cluster_port : 5432
+  aurora_secret_arn         = local.c.enable_aurora ? module.aurora_postgres[0].master_password_secret_arn : ""
 }
 
 # =============================================================================

@@ -48,6 +48,12 @@ variable "postgres_port" {
   default     = 5432
 }
 
+variable "aurora_secret_arn" {
+  description = "Secrets Manager ARN for Aurora master password (JSON format: {username, password})"
+  type        = string
+  default     = ""
+}
+
 variable "enable_debezium_connector" {
   description = "Deploy Debezium source connector (requires Aurora CDC: replication slot, publication, Secrets Manager)"
   type        = bool

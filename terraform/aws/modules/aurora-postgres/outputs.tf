@@ -1,3 +1,8 @@
+output "cluster_arn" {
+  description = "Aurora cluster ARN (used for RDS Data API calls)"
+  value       = aws_rds_cluster.this.arn
+}
+
 output "cluster_endpoint" {
   description = "Aurora cluster writer endpoint"
   value       = aws_rds_cluster.this.endpoint

@@ -52,6 +52,24 @@ variable "enable_quicksight" {
   default     = false
 }
 
+variable "query_results_bucket_arn" {
+  description = "ARN of the query results bucket (for QuickSight Athena access)"
+  type        = string
+  default     = ""
+}
+
+variable "quicksight_kms_key_arn" {
+  description = "ARN of the KMS key used for Athena query results encryption (required for QuickSight)"
+  type        = string
+  default     = ""
+}
+
+variable "athena_workgroup_name" {
+  description = "Athena workgroup name for QuickSight data source"
+  type        = string
+  default     = "primary"
+}
+
 variable "tags" {
   description = "Common tags for all resources"
   type        = map(string)

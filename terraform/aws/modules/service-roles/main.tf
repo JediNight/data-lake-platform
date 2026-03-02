@@ -197,6 +197,38 @@ resource "aws_iam_role_policy" "kafka_connect_glue" {
   })
 }
 
+resource "aws_iam_role_policy" "kafka_connect_kms" {
+  name = "kms-decrypt-encrypt"
+  role = aws_iam_role.kafka_connect.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "KMSDecryptEncrypt"
+      Effect   = "Allow"
+      Action   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
+      Resource = [var.mnpi_kms_key_arn, var.nonmnpi_kms_key_arn]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "kafka_connect_secrets" {
+  count = var.aurora_secret_arn != "" ? 1 : 0
+
+  name = "secretsmanager-aurora-read"
+  role = aws_iam_role.kafka_connect.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "SecretsManagerAuroraRead"
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = var.aurora_secret_arn
+    }]
+  })
+}
+
 # =============================================================================
 # Glue ETL Role
 # =============================================================================

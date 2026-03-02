@@ -74,6 +74,12 @@ variable "query_results_bucket_arn" {
   type        = string
 }
 
+variable "aurora_secret_arn" {
+  description = "ARN of the Aurora master password Secrets Manager secret (for Debezium CDC)"
+  type        = string
+  default     = ""
+}
+
 variable "extra_s3_read_bucket_arns" {
   description = "Additional S3 bucket ARNs the Glue ETL role needs read access to (e.g. local Iceberg dev bucket)"
   type        = list(string)

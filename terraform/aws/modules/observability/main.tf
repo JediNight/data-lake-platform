@@ -355,22 +355,138 @@ resource "aws_quicksight_account_subscription" "this" {
   notification_email    = "admin@example.com"
 }
 
-resource "aws_quicksight_data_source" "athena" {
+# -----------------------------------------------------------------------------
+# QuickSight Service Role Policies
+# QuickSight uses the AWS-managed role aws-quicksight-service-role-v0 (created
+# automatically when the account subscription is provisioned).  We attach
+# additional IAM policies to it for S3, KMS, and Glue access.
+# -----------------------------------------------------------------------------
+
+data "aws_iam_role" "quicksight_service" {
   count = var.enable_quicksight ? 1 : 0
-
-  data_source_id = "datalake-athena-${var.environment}"
-  name           = "Data Lake Athena (${var.environment})"
-  type           = "ATHENA"
-
-  parameters {
-    athena {
-      work_group = "primary"
-    }
-  }
-
-  tags = merge(local.common_tags, {
-    Name = "quicksight-athena-${var.environment}"
-  })
+  name  = "aws-quicksight-service-role-v0"
 
   depends_on = [aws_quicksight_account_subscription.this]
+}
+
+resource "aws_iam_role_policy" "quicksight_s3_and_glue" {
+  count = var.enable_quicksight ? 1 : 0
+
+  name = "datalake-s3-glue-access"
+  role = data.aws_iam_role.quicksight_service[0].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "GlueCatalogRead"
+        Effect = "Allow"
+        Action = [
+          "glue:GetDatabase", "glue:GetDatabases",
+          "glue:GetTable", "glue:GetTables",
+          "glue:GetPartition", "glue:GetPartitions",
+          "glue:BatchGetPartition",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "S3DataLakeRead"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject", "s3:ListBucket", "s3:GetBucketLocation",
+        ]
+        Resource = [
+          var.mnpi_bucket_arn, "${var.mnpi_bucket_arn}/*",
+          var.nonmnpi_bucket_arn, "${var.nonmnpi_bucket_arn}/*",
+        ]
+      },
+      {
+        Sid    = "S3QueryResultsReadWrite"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject", "s3:PutObject", "s3:ListBucket",
+          "s3:GetBucketLocation", "s3:AbortMultipartUpload",
+          "s3:ListMultipartUploadParts", "s3:ListBucketMultipartUploads",
+        ]
+        Resource = [
+          var.query_results_bucket_arn,
+          "${var.query_results_bucket_arn}/*",
+        ]
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "quicksight_kms" {
+  count = var.enable_quicksight && var.quicksight_kms_key_arn != "" ? 1 : 0
+
+  name = "datalake-kms-access"
+  role = data.aws_iam_role.quicksight_service[0].name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "KMSForAthenaQueryResults"
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey",
+        "kms:DescribeKey",
+      ]
+      Resource = var.quicksight_kms_key_arn
+    }]
+  })
+}
+
+# -----------------------------------------------------------------------------
+# QuickSight Data Source — Athena with correct workgroup
+# Uses null_resource + AWS CLI because the Terraform aws provider does not
+# support the RoleArn parameter in AthenaParameters (required for
+# programmatic data source creation).
+# depends_on ensures IAM policies propagate before data source creation.
+# -----------------------------------------------------------------------------
+
+resource "null_resource" "quicksight_athena_datasource" {
+  count = var.enable_quicksight ? 1 : 0
+
+  triggers = {
+    workgroup  = var.athena_workgroup_name
+    account_id = var.account_id
+    role_arn   = data.aws_iam_role.quicksight_service[0].arn
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Wait for IAM policy propagation
+      sleep 10
+      # Delete existing failed data source if present
+      aws quicksight delete-data-source \
+        --aws-account-id ${var.account_id} \
+        --data-source-id "datalake-athena-${var.environment}" 2>/dev/null || true
+      sleep 2
+      # Create with RoleArn (not supported by Terraform aws provider)
+      aws quicksight create-data-source \
+        --aws-account-id ${var.account_id} \
+        --data-source-id "datalake-athena-${var.environment}" \
+        --name "Data Lake Athena (${var.environment})" \
+        --type ATHENA \
+        --data-source-parameters '{"AthenaParameters":{"WorkGroup":"${var.athena_workgroup_name}","RoleArn":"${data.aws_iam_role.quicksight_service[0].arn}"}}' \
+        --permissions '[{"Principal":"arn:aws:quicksight:${data.aws_region.current.id}:${var.account_id}:user/default/AWSReservedSSO_AdministratorAccess_acf5dc9d63ba965c/tfawibe","Actions":["quicksight:DescribeDataSource","quicksight:DescribeDataSourcePermissions","quicksight:PassDataSource","quicksight:UpdateDataSource","quicksight:DeleteDataSource","quicksight:UpdateDataSourcePermissions"]}]'
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      aws quicksight delete-data-source \
+        --aws-account-id ${self.triggers.account_id} \
+        --data-source-id "datalake-athena-${self.triggers.account_id}" 2>/dev/null || true
+    EOT
+  }
+
+  depends_on = [
+    aws_quicksight_account_subscription.this,
+    aws_iam_role_policy.quicksight_s3_and_glue,
+    aws_iam_role_policy.quicksight_kms,
+  ]
 }
