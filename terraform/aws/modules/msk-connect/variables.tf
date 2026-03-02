@@ -48,6 +48,12 @@ variable "postgres_port" {
   default     = 5432
 }
 
+variable "enable_debezium_connector" {
+  description = "Deploy Debezium source connector (requires Aurora CDC: replication slot, publication, Secrets Manager)"
+  type        = bool
+  default     = false
+}
+
 variable "debezium_version" {
   description = "Debezium connector version"
   type        = string

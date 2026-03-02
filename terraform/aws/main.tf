@@ -228,9 +228,10 @@ module "msk_connect" {
   nonmnpi_bucket_arn     = module.data_lake_storage.nonmnpi_bucket_arn
   kafka_connect_role_arn = module.service_roles.kafka_connect_role_arn
 
-  # Aurora connection info
-  postgres_endpoint = local.c.enable_aurora ? module.aurora_postgres[0].cluster_endpoint : ""
-  postgres_port     = local.c.enable_aurora ? module.aurora_postgres[0].cluster_port : 5432
+  # Aurora connection — Debezium requires Aurora + CDC setup (replication slot, publication, Secrets Manager)
+  enable_debezium_connector = try(local.c.enable_debezium_connector, false)
+  postgres_endpoint         = local.c.enable_aurora ? module.aurora_postgres[0].cluster_endpoint : ""
+  postgres_port             = local.c.enable_aurora ? module.aurora_postgres[0].cluster_port : 5432
 }
 
 # =============================================================================

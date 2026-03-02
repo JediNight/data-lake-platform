@@ -61,10 +61,13 @@ resource "aws_mskconnect_worker_configuration" "this" {
 
 # =============================================================================
 # Debezium Source Connector
+# Requires Aurora CDC setup: replication slot, publication, Secrets Manager password.
+# Set enable_debezium_connector = true once Aurora CDC is configured.
 # =============================================================================
 
 resource "aws_mskconnect_connector" "debezium_source" {
-  name = "debezium-source-${var.environment}"
+  count = var.enable_debezium_connector ? 1 : 0
+  name  = "debezium-source-${var.environment}"
 
   kafkaconnect_version = "3.7.x"
 
@@ -157,7 +160,9 @@ resource "aws_mskconnect_connector" "iceberg_sink_mnpi" {
     "tasks.max"                          = "1"
     "topics"                             = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions"
     "iceberg.catalog.type"               = "glue"
-    "iceberg.catalog.warehouse"          = "${var.mnpi_bucket_arn}/"
+    "iceberg.catalog.warehouse"          = "s3://${replace(var.mnpi_bucket_arn, "arn:aws:s3:::", "")}"
+    "iceberg.catalog.io-impl"            = "org.apache.iceberg.aws.s3.S3FileIO"
+    "iceberg.tables"                     = "raw_mnpi_${var.environment}.orders,raw_mnpi_${var.environment}.trades,raw_mnpi_${var.environment}.positions"
     "iceberg.tables.auto-create-enabled" = "true"
     "iceberg.tables.upsert-mode-enabled" = "false"
     "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
@@ -229,7 +234,9 @@ resource "aws_mskconnect_connector" "iceberg_sink_nonmnpi" {
     "tasks.max"                          = "1"
     "topics"                             = "cdc.trading.accounts,cdc.trading.instruments,stream.market-data"
     "iceberg.catalog.type"               = "glue"
-    "iceberg.catalog.warehouse"          = "${var.nonmnpi_bucket_arn}/"
+    "iceberg.catalog.warehouse"          = "s3://${replace(var.nonmnpi_bucket_arn, "arn:aws:s3:::", "")}"
+    "iceberg.catalog.io-impl"            = "org.apache.iceberg.aws.s3.S3FileIO"
+    "iceberg.tables"                     = "raw_nonmnpi_${var.environment}.accounts,raw_nonmnpi_${var.environment}.instruments,raw_nonmnpi_${var.environment}.market_data"
     "iceberg.tables.auto-create-enabled" = "true"
     "iceberg.tables.upsert-mode-enabled" = "false"
     "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
