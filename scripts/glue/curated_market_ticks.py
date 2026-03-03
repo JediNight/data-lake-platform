@@ -1,14 +1,16 @@
 """
 Curated Market Ticks: Clean + type-cast streaming market data.
 
-Source: raw_nonmnpi_{env}.nonmnpi_events (Iceberg, append-only from Kafka)
+Source: raw_nonmnpi_{env}.market_data (Iceberg, append-only from Kafka)
 Target: curated_nonmnpi_{env}.market_ticks (Iceberg, typed + enriched)
 
 Transform logic:
-  1. Cast string price fields to double (ask, bid, last_price)
-  2. Cast timestamp string to proper timestamp type
-  3. Calculate spread (ask - bid) and mid_price ((ask + bid) / 2)
-  4. Deduplicate by tick_id (take latest per tick_id)
+  1. Filter out tombstone records (ticker IS NOT NULL AND != '')
+  2. Cast string price fields to double (ask, bid, last_price)
+  3. Cast timestamp string to proper timestamp type
+  4. Calculate spread (ask - bid) and mid_price ((ask + bid) / 2)
+  5. Deduplicate by tick_id (take latest per tick_id)
+  6. Drop internal columns (_topic)
 """
 
 import sys
@@ -61,8 +63,8 @@ glue_ctx = GlueContext(spark.sparkContext)
 job = Job(glue_ctx)
 job.init(args["JOB_NAME"], args)
 
-# --- Read raw non-MNPI events ---
-source_table = f"glue_catalog.raw_nonmnpi_{env}.nonmnpi_events"
+# --- Read raw market data ---
+source_table = f"glue_catalog.raw_nonmnpi_{env}.market_data"
 df = spark.table(source_table)
 
 # 1. Filter nulls/tombstones
@@ -76,7 +78,7 @@ df_deduped = df_filtered.withColumn("rn", F.row_number().over(window)).filter(
     F.col("rn") == 1
 ).drop("rn")
 
-# 3. Cast types + add derived columns
+# 3. Cast types + add derived columns, drop internal columns
 bid_col = F.col("bid").cast("double")
 ask_col = F.col("ask").cast("double")
 

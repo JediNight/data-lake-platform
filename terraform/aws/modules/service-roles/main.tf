@@ -101,13 +101,17 @@ resource "aws_iam_role_policy" "kafka_connect_msk" {
           "kafka-cluster:AlterTopic",
           "kafka-cluster:ReadData",
           "kafka-cluster:WriteData",
+          "kafka-cluster:WriteDataIdempotently",
           "kafka-cluster:DescribeGroup",
           "kafka-cluster:AlterGroup",
+          "kafka-cluster:AlterTransactionalId",
+          "kafka-cluster:DescribeTransactionalId",
         ]
         Resource = var.msk_cluster_arn != "" ? [
           var.msk_cluster_arn,
           "${replace(var.msk_cluster_arn, ":cluster/", ":topic/")}/*",
           "${replace(var.msk_cluster_arn, ":cluster/", ":group/")}/*",
+          "${replace(var.msk_cluster_arn, ":cluster/", ":transactional-id/")}/*",
         ] : ["*"]
       },
     ]
@@ -155,10 +159,11 @@ resource "aws_iam_role_policy" "kafka_connect_glue" {
         Sid    = "GlueCatalogWriteForIceberg"
         Effect = "Allow"
         Action = [
-          "glue:GetTable",
-          "glue:GetTables",
           "glue:GetDatabase",
           "glue:GetDatabases",
+          "glue:CreateDatabase",
+          "glue:GetTable",
+          "glue:GetTables",
           "glue:CreateTable",
           "glue:UpdateTable",
           "glue:DeleteTable",

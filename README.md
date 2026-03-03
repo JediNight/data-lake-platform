@@ -4,7 +4,7 @@ Secure, auditable AWS data lake with MNPI/non-MNPI isolation for an asset manage
 
 Real-time CDC and streaming ingestion into Apache Iceberg tables on S3, with Lake Formation attribute-based access control (ABAC) and a medallion architecture powered by Glue ETL.
 
-![Architecture Diagram](generated-diagrams/data-lake-architecture.png)
+![Architecture Diagram](generated-diagrams/data-lake-platform-full-architecture.png)
 
 ## Key Capabilities
 
@@ -146,7 +146,7 @@ task aws:apply TF_WORKSPACE=prod
 AWS_PROFILE=data-lake aws glue start-workflow-run --name datalake-medallion-prod
 
 # 6. Verify data flow end-to-end
-task athena:query QUERY="SELECT count(*) FROM raw_mnpi_prod.mnpi_events" WORKGROUP=data-engineers-prod
+task athena:query QUERY="SELECT count(*) FROM raw_mnpi_prod.orders" WORKGROUP=data-engineers-prod
 ```
 
 ### Terraform Modules
@@ -176,7 +176,8 @@ task athena:query QUERY="SELECT count(*) FROM raw_mnpi_prod.mnpi_events" WORKGRO
 - **Secrets Manager** for Aurora credentials (not in Terraform state)
 - **CloudTrail** audit logging to dedicated S3 bucket with 5-year retention (SEC Rule 204-2)
 
-## Design Documents
+## Documentation
 
+- [`docs/REVIEWER_GUIDE.md`](docs/REVIEWER_GUIDE.md) — **Start here** — self-service reviewer onboarding with verification commands
 - [`docs/documentation.md`](docs/documentation.md) — Full platform documentation (data model, security, ETL lineage, deployment)
 - [`docs/plans/`](docs/plans/) — Design and implementation plans

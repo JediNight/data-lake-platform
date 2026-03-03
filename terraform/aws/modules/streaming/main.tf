@@ -70,6 +70,8 @@ resource "aws_msk_configuration" "this" {
     min.insync.replicas = 1
     num.partitions = 3
     log.retention.hours = 168
+    transaction.state.log.replication.factor = ${var.default_replication_factor}
+    transaction.state.log.min.isr = 1
   PROPERTIES
 }
 

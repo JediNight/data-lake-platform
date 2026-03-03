@@ -55,6 +55,11 @@ variable "glue_etl_role_arn" {
   type        = string
 }
 
+variable "kafka_connect_role_arn" {
+  description = "ARN of the Kafka Connect IAM role (for Iceberg sink LF permissions)"
+  type        = string
+}
+
 variable "tags" {
   description = "Common resource tags"
   type        = map(string)

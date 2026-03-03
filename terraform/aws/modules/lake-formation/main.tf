@@ -378,3 +378,69 @@ resource "aws_lakeformation_permissions" "glue_etl_write_tables" {
     aws_lakeformation_data_lake_settings.this,
   ]
 }
+
+# =============================================================================
+# Kafka Connect Role — Database, Table & Data Location Permissions
+# =============================================================================
+# The MSK Connect Iceberg sink connector needs:
+#   - DESCRIBE + CREATE_TABLE on raw databases (auto-create-enabled=true)
+#   - ALL on tables in raw databases (write Iceberg data files)
+#   - DATA_LOCATION_ACCESS on both S3 buckets
+# =============================================================================
+
+resource "aws_lakeformation_permissions" "kafka_connect_databases" {
+  for_each = {
+    for k, v in var.database_names : k => v
+    if startswith(k, "raw_")
+  }
+
+  principal   = var.kafka_connect_role_arn
+  permissions = ["DESCRIBE", "CREATE_TABLE"]
+
+  database {
+    name = each.value
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+  ]
+}
+
+resource "aws_lakeformation_permissions" "kafka_connect_tables" {
+  for_each = {
+    for k, v in var.database_names : k => v
+    if startswith(k, "raw_")
+  }
+
+  principal   = var.kafka_connect_role_arn
+  permissions = ["ALL"]
+
+  table {
+    database_name = each.value
+    wildcard      = true
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+  ]
+}
+
+resource "aws_lakeformation_permissions" "kafka_connect_data_location" {
+  for_each = {
+    mnpi    = var.mnpi_bucket_arn
+    nonmnpi = var.nonmnpi_bucket_arn
+  }
+
+  principal   = var.kafka_connect_role_arn
+  permissions = ["DATA_LOCATION_ACCESS"]
+
+  data_location {
+    arn = each.value
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_resource.mnpi_bucket,
+    aws_lakeformation_resource.nonmnpi_bucket,
+  ]
+}

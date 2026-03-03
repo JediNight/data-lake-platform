@@ -29,6 +29,12 @@ locals {
     Environment = var.environment
   })
 
+  # Zone-to-bucket mapping for Iceberg warehouse paths
+  zone_buckets = {
+    mnpi    = var.mnpi_bucket_id
+    nonmnpi = var.nonmnpi_bucket_id
+  }
+
   # Job config map — drives for_each on aws_s3_object and aws_glue_job
   jobs = {
     curated_order_events = {
@@ -100,7 +106,7 @@ resource "aws_glue_job" "this" {
     "--enable-metrics"                   = "true"
     "--job-language"                     = "python"
     "--TempDir"                          = "s3://${var.scripts_bucket_id}/glue-temp/"
-    "--iceberg-warehouse"                = "s3://${var.scripts_bucket_id}/iceberg-warehouse/"
+    "--iceberg-warehouse"                = "s3://${local.zone_buckets[each.value.zone]}/"
   }
 
   tags = merge(local.common_tags, {

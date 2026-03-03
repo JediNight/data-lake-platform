@@ -69,5 +69,11 @@ variable "debezium_version" {
 variable "iceberg_connector_version" {
   description = "Iceberg sink connector version (Apache Iceberg kafka-connect-runtime)"
   type        = string
-  default     = "1.8.1"
+  default     = "1.9.2"
+}
+
+variable "default_replication_factor" {
+  description = "Default replication factor for worker-created topics (must match broker count)"
+  type        = number
+  default     = 2
 }

@@ -20,7 +20,7 @@ This platform is a secure, auditable, and scalable AWS data lake for an asset ma
 
 ### Architecture Diagram
 
-See [`generated-diagrams/data-lake-architecture.png`](../generated-diagrams/data-lake-architecture.png) for the full visual diagram.
+See [`generated-diagrams/data-lake-platform-full-architecture.png`](../generated-diagrams/data-lake-platform-full-architecture.png) for the full visual diagram.
 
 ### Data Flow
 
@@ -66,7 +66,7 @@ EventBridge (1 min) ──► Lambda Trading Simulator                          
 
 | Layer | Purpose | Transform Engine | Storage |
 |-------|---------|-----------------|---------|
-| **Raw** | Full CDC event history (append-only) | MSK Connect Iceberg Sink | Partitioned by `days(source_timestamp)` |
+| **Raw** | Full CDC event history (append-only, per-topic tables) | MSK Connect Iceberg Sink | One table per source topic |
 | **Curated** | Cleaned, deduped, typed current-state | Glue ETL PySpark | Iceberg MERGE/overwrite |
 | **Analytics** | Pre-aggregated reporting tables | Glue ETL PySpark | Iceberg overwrite |
 
@@ -79,7 +79,7 @@ data-lake-platform/                        (main branch — production)
 ├── Taskfile.yml                           # AWS deploy + Athena query tasks
 │
 ├── terraform/aws/
-│   ├── main.tf                            # Root module (AWS provider ~> 5.0)
+│   ├── main.tf                            # Root module (AWS provider ~> 6.0)
 │   ├── locals.tf                          # Per-environment config (dev | prod)
 │   ├── backend.tf                         # S3 state backend (native S3 locking)
 │   ├── dev.tfvars / prod.tfvars           # Environment-specific variable overrides
@@ -350,13 +350,13 @@ networking
 Access: curated + analytics layers, both MNPI and non-MNPI zones.
 
 ```sql
--- MNPI curated data (SUCCEEDS)
+-- MNPI curated data (SUCCEEDS — finance analysts can see MNPI curated/analytics)
 SELECT COUNT(*) AS total_orders FROM curated_mnpi_prod.order_events;
 
 -- Non-MNPI analytics (SUCCEEDS)
 SELECT * FROM analytics_nonmnpi_prod.market_summary LIMIT 5;
 
--- Raw layer (FAILS — AccessDeniedException)
+-- Raw layer (FAILS — AccessDeniedException, finance analysts cannot access raw)
 -- SELECT COUNT(*) FROM raw_mnpi_prod.orders;  -- DENIED
 ```
 
@@ -447,27 +447,47 @@ Four Glue 4.0 PySpark jobs transform data through the medallion layers. All jobs
 ### End-to-End Data Lineage
 
 ```
- INGESTION                        RAW                      CURATED                    ANALYTICS
-─────────────                 ──────────               ─────────────              ───────────────
+ INGESTION                        RAW (per-topic Iceberg tables)       CURATED                    ANALYTICS
+─────────────                 ─────────────────────────────────    ─────────────              ───────────────
 
-Lambda → Aurora               raw_mnpi_{env}           curated_mnpi_{env}         analytics_mnpi_{env}
-  (orders,trades,positions)     .mnpi_events    ──►      .order_events     ──►      .order_summary
-  Debezium CDC → Kafka            (append-only             (deduplicated,            (per-ticker
-  → Iceberg Sink → S3              CDC events)              typed, derived)           aggregates)
-
-Lambda → Kafka                raw_nonmnpi_{env}        curated_nonmnpi_{env}      analytics_nonmnpi_{env}
-  (market data ticks)           .nonmnpi_events  ──►     .market_ticks      ──►     .market_summary
-  → Iceberg Sink → S3            (append-only             (deduplicated,            (per-ticker
-                                  stream events)           typed, derived)           aggregates)
+Lambda → Aurora               raw_mnpi_{env}                      curated_mnpi_{env}         analytics_mnpi_{env}
+  (orders,trades,positions)     .orders         ──┐                 .order_events     ──►      .order_summary
+  Debezium CDC → Kafka          .trades           ├── Glue ETL ──►   (deduplicated,            (per-instrument
+  → Iceberg Sink → S3           .positions        │                   typed, derived)           aggregates)
+                                  (append-only    │
+                                   CDC events)    │
+                                                  │
+Lambda → Kafka                raw_nonmnpi_{env}   │               curated_nonmnpi_{env}      analytics_nonmnpi_{env}
+  (market data ticks)           .market_data    ──┘                 .market_ticks      ──►     .market_summary
+  → Iceberg Sink → S3           .accounts                           (deduplicated,            (per-ticker
+                                .instruments                         typed, derived)           aggregates)
+                                  (append-only
+                                   stream + CDC events)
 ```
+
+> **Note:** Debezium creates one Iceberg table per source topic (not a unified event table). The curated layer currently transforms `orders` → `order_events` and `market_data` → `market_ticks`. The `trades`, `positions`, `accounts`, and `instruments` tables are available in raw for direct querying and future curated transforms.
 
 ### Raw Layer (ingestion — no Glue involvement)
 
-MSK Connect Iceberg sinks write directly to S3. Glue ETL does not touch this layer — it only reads from it.
+MSK Connect Iceberg sinks write directly to S3. Glue ETL does not touch this layer — it only reads from it. Debezium creates **one Iceberg table per CDC source topic**, not a unified event table.
 
-**MNPI raw table** (`raw_mnpi_{env}.mnpi_events`): Append-only CDC events from Debezium capturing every INSERT, UPDATE, and DELETE on the `orders`, `trades`, and `positions` tables in Aurora. Each row is a Kafka message with fields stored as strings by the Iceberg sink connector.
+**MNPI raw tables** (`raw_mnpi_{env}`):
 
-**Non-MNPI raw table** (`raw_nonmnpi_{env}.nonmnpi_events`): Append-only market data ticks produced directly by the Lambda trading simulator, plus CDC events from the `accounts` and `instruments` tables. All fields arrive as strings.
+| Table | Source | Key Columns |
+|-------|--------|-------------|
+| `orders` | `cdc.trading.orders` | `order_id`, `account_id`, `instrument_id`, `side`, `quantity`(string), `order_type`, `status`, `disclosure_status`, `limit_price`(string), `created_at`(string), `updated_at`(string), `_topic`, `_cdc`(struct) |
+| `trades` | `cdc.trading.trades` | `trade_id`, `order_id`, `instrument_id`, `quantity`(string), `price`(string), `execution_venue`, `settlement_date`, `disclosure_status`, `executed_at`(string), `_topic`, `_cdc`(struct) |
+| `positions` | `cdc.trading.positions` | `position_id`, `account_id`, `instrument_id`, `quantity`(string), `market_value`(string), `position_date`, `_topic`, `_cdc`(struct) |
+
+**Non-MNPI raw tables** (`raw_nonmnpi_{env}`):
+
+| Table | Source | Key Columns |
+|-------|--------|-------------|
+| `market_data` | `stream.market-data` | `tick_id`, `ticker`, `bid`(string), `ask`(string), `last_price`(string), `volume`, `instrument_id`, `timestamp`(string), `_topic` |
+| `accounts` | `cdc.trading.accounts` | `account_id`, `account_name`, `account_type`, `status`, `created_at`(string), `_topic`, `_cdc`(struct) |
+| `instruments` | `cdc.trading.instruments` | `instrument_id`, `ticker`, `cusip`, `isin`, `name`, `instrument_type`, `exchange`, `_topic`, `_cdc`(struct) |
+
+The `_cdc` struct (present on Debezium tables) contains: `op` (c/u/d for create/update/delete), `offset`, `source`, `key`, `ts`, `target`. The `_topic` column records the source Kafka topic. All field values arrive as strings from the Iceberg sink connector.
 
 ### Raw → Curated Transforms
 
@@ -475,35 +495,38 @@ The curated layer produces clean, typed, deduplicated current-state tables from 
 
 #### Job 1: `curated_order_events` (MNPI)
 
-**Source:** `raw_mnpi_{env}.mnpi_events` → **Target:** `curated_mnpi_{env}.order_events`
+**Source:** `raw_mnpi_{env}.orders` → **Target:** `curated_mnpi_{env}.order_events`
 
 | Step | Operation | Detail |
 |------|-----------|--------|
-| Filter | Remove nulls/tombstones | `ticker IS NOT NULL AND ticker != '' AND event_type IS NOT NULL AND event_type != ''` |
-| Dedup | `ROW_NUMBER` by `event_id` | Partition by `event_id`, order by `timestamp DESC` — keeps the latest event per ID |
-| Cast | String → proper types | `quantity` string → bigint, `timestamp` string → timestamp |
-| Derive | Add computed columns | `is_buy` (boolean: `side == 'BUY'`), `event_hour` (truncated timestamp for partitioning) |
-| DQ | Fail job if checks fail | `row_count > 0`, `no null event_ids` |
+| Filter | Remove CDC deletes + tombstones | `_cdc.op != 'd'` AND `order_id IS NOT NULL` |
+| Dedup | `ROW_NUMBER` by `order_id` | Partition by `order_id`, order by `updated_at DESC` — keeps the latest version per order |
+| Cast | String → proper types | `quantity` string → bigint, `limit_price` string → double, `created_at`/`updated_at` string → timestamp |
+| Derive | Add computed columns | `is_buy` (boolean: `side == 'BUY'`), `order_hour` (truncated `created_at` for time-based analysis) |
+| Drop | Remove internal columns | `_topic`, `_cdc` (Debezium metadata not needed downstream) |
+| DQ | Fail job if checks fail | `row_count > 0`, `no null order_ids` |
 
 **Output schema:**
 
 | Column | Type | Source |
 |--------|------|--------|
-| `event_id` | string | passthrough |
-| `event_type` | string | passthrough |
-| `ticker` | string | passthrough |
-| `side` | string | passthrough |
-| `quantity` | bigint | cast from string |
 | `order_id` | string | passthrough |
 | `account_id` | string | passthrough |
 | `instrument_id` | string | passthrough |
-| `event_timestamp` | timestamp | cast from string |
+| `side` | string | passthrough (BUY/SELL) |
+| `order_type` | string | passthrough (MARKET/LIMIT/STOP) |
+| `quantity` | bigint | cast from string |
+| `limit_price` | double | cast from string |
+| `status` | string | passthrough (PENDING/FILLED/PARTIAL/CANCELLED) |
+| `disclosure_status` | string | passthrough (MNPI/DISCLOSED/PUBLIC) |
+| `created_at` | timestamp | cast from string |
+| `updated_at` | timestamp | cast from string |
 | `is_buy` | boolean | derived: `side == 'BUY'` |
-| `event_hour` | timestamp | derived: `date_trunc('hour', timestamp)` |
+| `order_hour` | timestamp | derived: `date_trunc('hour', created_at)` |
 
 #### Job 2: `curated_market_ticks` (Non-MNPI)
 
-**Source:** `raw_nonmnpi_{env}.nonmnpi_events` → **Target:** `curated_nonmnpi_{env}.market_ticks`
+**Source:** `raw_nonmnpi_{env}.market_data` → **Target:** `curated_nonmnpi_{env}.market_ticks`
 
 | Step | Operation | Detail |
 |------|-----------|--------|
@@ -531,25 +554,25 @@ The curated layer produces clean, typed, deduplicated current-state tables from 
 
 ### Curated → Analytics Transforms
 
-The analytics layer pre-aggregates curated data into per-ticker summary tables for dashboards and reporting. Both analytics jobs group by `ticker` and produce one row per ticker.
+The analytics layer pre-aggregates curated data into summary tables for dashboards and reporting. The order summary groups by `instrument_id` (orders don't have a ticker column — the join to instruments is a future enhancement). The market summary groups by `ticker`.
 
 #### Job 3: `analytics_order_summary` (MNPI)
 
 **Source:** `curated_mnpi_{env}.order_events` → **Target:** `analytics_mnpi_{env}.order_summary`
 
-**Output schema (one row per ticker):**
+**Output schema (one row per instrument):**
 
 | Column | Type | Aggregation |
 |--------|------|-------------|
-| `ticker` | string | group key |
+| `instrument_id` | string | group key |
 | `total_orders` | bigint | `COUNT(*)` |
 | `buy_orders` | bigint | `COUNT(WHERE is_buy)` |
 | `sell_orders` | bigint | `COUNT(WHERE NOT is_buy)` |
 | `total_volume` | bigint | `SUM(quantity)` |
 | `avg_order_size` | bigint | `ROUND(AVG(quantity))` |
 | `buy_sell_ratio` | double | `buy_orders / sell_orders` (null-safe, >1 = net buying pressure) |
-| `first_order_at` | timestamp | `MIN(event_timestamp)` |
-| `last_order_at` | timestamp | `MAX(event_timestamp)` |
+| `first_order_at` | timestamp | `MIN(created_at)` |
+| `last_order_at` | timestamp | `MAX(created_at)` |
 
 **DQ check:** `row_count > 0`
 
@@ -581,7 +604,7 @@ Every job runs inline DQ checks before writing. If any check fails, the job rais
 
 | Layer | Checks |
 |-------|--------|
-| Curated | Row count > 0 (source not empty), no null primary keys (event_id / tick_id) |
+| Curated | Row count > 0 (source not empty), no null primary keys (`order_id` / `tick_id`) |
 | Analytics | Row count > 0 (aggregation produced results) |
 
 ### Write Strategy

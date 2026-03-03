@@ -33,14 +33,26 @@ data "aws_secretsmanager_secret_version" "aurora" {
 locals {
   iceberg_sinks = {
     mnpi = {
-      topics     = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions"
-      bucket_arn = var.mnpi_bucket_arn
-      tables     = "raw_mnpi_${var.environment}.orders,raw_mnpi_${var.environment}.trades,raw_mnpi_${var.environment}.positions"
+      topics        = "cdc.trading.orders,cdc.trading.trades,cdc.trading.positions"
+      bucket_arn    = var.mnpi_bucket_arn
+      tables        = "raw_mnpi_${var.environment}.orders,raw_mnpi_${var.environment}.trades,raw_mnpi_${var.environment}.positions"
+      cdc_transform = true # All topics are Debezium CDC — apply DebeziumTransform
+      route_rules = {
+        "raw_mnpi_${var.environment}.orders"    = "cdc\\.trading\\.orders"
+        "raw_mnpi_${var.environment}.trades"    = "cdc\\.trading\\.trades"
+        "raw_mnpi_${var.environment}.positions" = "cdc\\.trading\\.positions"
+      }
     }
     nonmnpi = {
-      topics     = "cdc.trading.accounts,cdc.trading.instruments,stream.market-data"
-      bucket_arn = var.nonmnpi_bucket_arn
-      tables     = "raw_nonmnpi_${var.environment}.accounts,raw_nonmnpi_${var.environment}.instruments,raw_nonmnpi_${var.environment}.market_data"
+      topics        = "cdc.trading.accounts,cdc.trading.instruments,stream.market-data"
+      bucket_arn    = var.nonmnpi_bucket_arn
+      tables        = "raw_nonmnpi_${var.environment}.accounts,raw_nonmnpi_${var.environment}.instruments,raw_nonmnpi_${var.environment}.market_data"
+      cdc_transform = false # Mixed CDC + direct stream — DebeziumTransform would break stream.market-data
+      route_rules = {
+        "raw_nonmnpi_${var.environment}.accounts"    = "cdc\\.trading\\.accounts"
+        "raw_nonmnpi_${var.environment}.instruments"  = "cdc\\.trading\\.instruments"
+        "raw_nonmnpi_${var.environment}.market_data"  = "stream\\.market-data"
+      }
     }
   }
 }
@@ -90,7 +102,11 @@ resource "aws_mskconnect_worker_configuration" "this" {
     key.converter=org.apache.kafka.connect.json.JsonConverter
     value.converter=org.apache.kafka.connect.json.JsonConverter
     key.converter.schemas.enable=false
-    value.converter.schemas.enable=true
+    value.converter.schemas.enable=false
+    topic.creation.enable=true
+    topic.creation.default.replication.factor=${var.default_replication_factor}
+    topic.creation.default.partitions=3
+    topic.creation.default.cleanup.policy=delete
   EOT
 }
 
@@ -133,14 +149,15 @@ resource "aws_mskconnect_connector" "debezium_source" {
     "slot.name"                   = "debezium_slot"
 
     # Topic configuration
-    "topic.prefix"       = "cdc.trading"
-    "table.include.list" = "public.orders,public.trades,public.positions,public.accounts,public.instruments"
+    "topic.prefix"          = "cdc.trading"
+    "topic.naming.strategy" = "io.debezium.schema.DefaultTopicNamingStrategy" # Omit schema from topic names: cdc.trading.orders (not cdc.trading.public.orders)
+    "table.include.list"    = "public.orders,public.trades,public.positions,public.accounts,public.instruments"
 
     # Converters
     "key.converter"                  = "org.apache.kafka.connect.json.JsonConverter"
     "value.converter"                = "org.apache.kafka.connect.json.JsonConverter"
     "key.converter.schemas.enable"   = "false"
-    "value.converter.schemas.enable" = "true"
+    "value.converter.schemas.enable" = "false"
 
     # Data handling
     "decimal.handling.mode" = "string"
@@ -213,21 +230,49 @@ resource "aws_mskconnect_connector" "iceberg_sink" {
     }
   }
 
-  connector_configuration = {
-    "connector.class"                    = "org.apache.iceberg.connect.IcebergSinkConnector"
-    "tasks.max"                          = "1"
-    "topics"                             = each.value.topics
-    "iceberg.catalog.type"               = "glue"
-    "iceberg.catalog.warehouse"          = "s3://${replace(each.value.bucket_arn, "arn:aws:s3:::", "")}"
-    "iceberg.catalog.io-impl"            = "org.apache.iceberg.aws.s3.S3FileIO"
-    "iceberg.tables"                     = each.value.tables
-    "iceberg.tables.auto-create-enabled" = "true"
-    "iceberg.tables.upsert-mode-enabled" = "false"
-    "key.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
-    "value.converter"                    = "org.apache.kafka.connect.json.JsonConverter"
-    "key.converter.schemas.enable"       = "false"
-    "value.converter.schemas.enable"     = "true"
-  }
+  connector_configuration = merge(
+    {
+      "connector.class"                      = "org.apache.iceberg.connect.IcebergSinkConnector"
+      "tasks.max"                            = "1"
+      "topics"                               = each.value.topics
+      "iceberg.catalog.type"                 = "glue"
+      "iceberg.catalog.warehouse"            = "s3://${replace(each.value.bucket_arn, "arn:aws:s3:::", "")}"
+      "iceberg.catalog.io-impl"              = "org.apache.iceberg.aws.s3.S3FileIO"
+      "iceberg.catalog.client.region"        = data.aws_region.current.name
+      "iceberg.tables"                       = each.value.tables
+      "iceberg.tables.auto-create-enabled"   = "true"
+      "iceberg.tables.evolve-schema-enabled" = "true"
+      "iceberg.tables.upsert-mode-enabled"   = "false"
+      "iceberg.control.topic"                = "control-iceberg-${each.key}"
+      "iceberg.control.commit.interval-ms"   = "120000"
+      "key.converter"                        = "org.apache.kafka.connect.json.JsonConverter"
+      "value.converter"                      = "org.apache.kafka.connect.json.JsonConverter"
+      "key.converter.schemas.enable"         = "false"
+      "value.converter.schemas.enable"       = "false"
+
+      # Topic-to-table routing — InsertField SMT injects Kafka topic name,
+      # then route-field + per-table route-regex directs each record to
+      # the correct Iceberg table. Without this, ALL records fan-out to ALL tables.
+      "iceberg.tables.route-field" = "_topic"
+    },
+    # Transform chain:
+    #   CDC zones:   DebeziumTransform (unwrap envelope) → InsertField (add _topic)
+    #   Mixed zones: InsertField only (CDC records stored as envelope; curated layer extracts)
+    each.value.cdc_transform ? {
+      "transforms"                         = "debezium,insertTopic"
+      "transforms.debezium.type"           = "org.apache.iceberg.connect.transforms.DebeziumTransform"
+      "transforms.insertTopic.type"        = "org.apache.kafka.connect.transforms.InsertField$Value"
+      "transforms.insertTopic.topic.field" = "_topic"
+    } : {
+      "transforms"                         = "insertTopic"
+      "transforms.insertTopic.type"        = "org.apache.kafka.connect.transforms.InsertField$Value"
+      "transforms.insertTopic.topic.field" = "_topic"
+    },
+    # Per-table route-regex: matches _topic field value to target table
+    { for table, regex in each.value.route_rules :
+      "iceberg.table.${table}.route-regex" => regex
+    }
+  )
 
   kafka_cluster {
     apache_kafka_cluster {

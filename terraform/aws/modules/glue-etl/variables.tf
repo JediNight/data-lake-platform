@@ -25,6 +25,16 @@ variable "scripts_bucket_id" {
   type        = string
 }
 
+variable "mnpi_bucket_id" {
+  description = "S3 bucket ID for MNPI data zone (warehouse for MNPI Glue jobs)"
+  type        = string
+}
+
+variable "nonmnpi_bucket_id" {
+  description = "S3 bucket ID for non-MNPI data zone (warehouse for non-MNPI Glue jobs)"
+  type        = string
+}
+
 variable "worker_count" {
   description = "Number of Glue workers per job"
   type        = number

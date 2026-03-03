@@ -146,6 +146,7 @@ module "lake_formation" {
   admin_role_arn            = var.admin_role_arn
   sso_instance_arn          = module.identity_center.sso_instance_arn
   glue_etl_role_arn         = module.service_roles.glue_etl_role_arn
+  kafka_connect_role_arn    = module.service_roles.kafka_connect_role_arn
 }
 
 # =============================================================================
@@ -191,6 +192,8 @@ module "glue_etl" {
   environment         = local.env
   glue_role_arn       = module.service_roles.glue_etl_role_arn
   scripts_bucket_id   = module.data_lake_storage.query_results_bucket_id
+  mnpi_bucket_id      = module.data_lake_storage.mnpi_bucket_id
+  nonmnpi_bucket_id   = module.data_lake_storage.nonmnpi_bucket_id
   worker_count        = local.c.glue_worker_count
   schedule_expression = local.c.glue_schedule
   tags                = {}
@@ -232,7 +235,8 @@ module "msk_connect" {
   security_group_ids     = [module.networking.msk_security_group_id]
   mnpi_bucket_arn        = module.data_lake_storage.mnpi_bucket_arn
   nonmnpi_bucket_arn     = module.data_lake_storage.nonmnpi_bucket_arn
-  kafka_connect_role_arn = module.service_roles.kafka_connect_role_arn
+  kafka_connect_role_arn     = module.service_roles.kafka_connect_role_arn
+  default_replication_factor = local.c.default_replication_factor
 
   # Aurora connection — Debezium requires Aurora + CDC setup (replication slot, publication, Secrets Manager)
   enable_debezium_connector = try(local.c.enable_debezium_connector, false)

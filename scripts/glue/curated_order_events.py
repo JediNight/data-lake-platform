@@ -1,14 +1,16 @@
 """
-Curated Order Events: Clean + type-cast streaming order events.
+Curated Order Events: Clean + type-cast CDC order data.
 
-Source: raw_mnpi_{env}.mnpi_events   (Iceberg, append-only from Kafka)
+Source: raw_mnpi_{env}.orders   (Iceberg, CDC from Debezium via MSK Connect)
 Target: curated_mnpi_{env}.order_events (Iceberg, deduplicated + typed)
 
 Transform logic:
-  1. Filter out empty/tombstone records (ticker IS NOT NULL AND != '')
-  2. Cast string fields to proper types (quantity -> bigint, timestamp -> timestamp)
-  3. Deduplicate by event_id (take latest per event_id via ROW_NUMBER)
-  4. Add derived columns: is_buy flag, event_hour for partitioning
+  1. Filter out CDC deletes (_cdc.op != 'd') and tombstones
+  2. Cast string fields to proper types (quantity -> bigint, limit_price -> double,
+     created_at/updated_at -> timestamp)
+  3. Deduplicate by order_id (latest updated_at wins via ROW_NUMBER)
+  4. Add derived columns: is_buy flag, order_hour for time-based analysis
+  5. Drop internal columns (_topic, _cdc)
 """
 
 import sys
@@ -61,48 +63,48 @@ glue_ctx = GlueContext(spark.sparkContext)
 job = Job(glue_ctx)
 job.init(args["JOB_NAME"], args)
 
-# --- Read raw MNPI events ---
-source_table = f"glue_catalog.raw_mnpi_{env}.mnpi_events"
+# --- Read raw CDC orders ---
+source_table = f"glue_catalog.raw_mnpi_{env}.orders"
 df = spark.table(source_table)
 
-# 1. Filter nulls/tombstones
+# 1. Filter out CDC deletes and tombstones
 df_filtered = df.filter(
-    F.col("ticker").isNotNull()
-    & (F.col("ticker") != "")
-    & F.col("event_type").isNotNull()
-    & (F.col("event_type") != "")
+    (F.col("_cdc.op") != "d")
+    & F.col("order_id").isNotNull()
 )
 
-# 2. Deduplicate by event_id (latest timestamp wins)
-window = Window.partitionBy("event_id").orderBy(F.col("timestamp").desc())
+# 2. Deduplicate by order_id (latest updated_at wins)
+window = Window.partitionBy("order_id").orderBy(F.col("updated_at").desc())
 df_deduped = df_filtered.withColumn("rn", F.row_number().over(window)).filter(
     F.col("rn") == 1
 ).drop("rn")
 
-# 3. Cast types + add derived columns
+# 3. Cast types + add derived columns, drop internal columns
 df_curated = df_deduped.select(
-    F.col("event_id"),
-    F.col("event_type"),
-    F.col("ticker"),
-    F.col("side"),
-    F.col("quantity").cast("bigint").alias("quantity"),
     F.col("order_id"),
     F.col("account_id"),
     F.col("instrument_id"),
-    F.to_timestamp("timestamp").alias("event_timestamp"),
+    F.col("side"),
+    F.col("order_type"),
+    F.col("quantity").cast("bigint").alias("quantity"),
+    F.col("limit_price").cast("double").alias("limit_price"),
+    F.col("status"),
+    F.col("disclosure_status"),
+    F.to_timestamp("created_at").alias("created_at"),
+    F.to_timestamp("updated_at").alias("updated_at"),
     (F.col("side") == "BUY").alias("is_buy"),
-    F.date_trunc("hour", F.to_timestamp("timestamp")).alias("event_hour"),
+    F.date_trunc("hour", F.to_timestamp("created_at")).alias("order_hour"),
 )
 
 # 4. Data quality checks
 target_table = f"glue_catalog.curated_mnpi_{env}.order_events"
 
 row_count = df_curated.count()
-null_event_ids = df_curated.filter(F.col("event_id").isNull()).count()
+null_order_ids = df_curated.filter(F.col("order_id").isNull()).count()
 
 assert_quality(df_curated, target_table, {
     "row_count > 0": row_count > 0,
-    "no null event_ids": null_event_ids == 0,
+    "no null order_ids": null_order_ids == 0,
     f"row_count={row_count}": True,
 })
 

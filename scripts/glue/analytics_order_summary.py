@@ -1,11 +1,11 @@
 """
-Analytics: Order Activity Summary per Ticker.
+Analytics: Order Activity Summary per Instrument.
 
 Source: curated_mnpi_{env}.order_events
 Target: analytics_mnpi_{env}.order_summary (Iceberg, pre-aggregated)
 
 Business metrics:
-  - Total orders, buy/sell split, volume per ticker
+  - Total orders, buy/sell split, volume per instrument
   - Average order size
   - Buy/sell ratio (values > 1 = net buying pressure)
   - First and last order timestamps
@@ -64,8 +64,8 @@ job.init(args["JOB_NAME"], args)
 source_table = f"glue_catalog.curated_mnpi_{env}.order_events"
 df = spark.table(source_table)
 
-# --- Aggregate per ticker ---
-df_summary = df.groupBy("ticker").agg(
+# --- Aggregate per instrument ---
+df_summary = df.groupBy("instrument_id").agg(
     F.count("*").alias("total_orders"),
     F.count(F.when(F.col("is_buy"), 1)).alias("buy_orders"),
     F.count(F.when(~F.col("is_buy"), 1)).alias("sell_orders"),
@@ -79,8 +79,8 @@ df_summary = df.groupBy("ticker").agg(
         ).cast("double"),
         2,
     ).alias("buy_sell_ratio"),
-    F.min("event_timestamp").alias("first_order_at"),
-    F.max("event_timestamp").alias("last_order_at"),
+    F.min("created_at").alias("first_order_at"),
+    F.max("created_at").alias("last_order_at"),
 )
 
 # --- Data quality checks ---
