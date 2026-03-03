@@ -2,8 +2,197 @@ version: '3'
 
 vars:
   TF_AWS_DIR: terraform/aws
+  SSO_START_URL: https://mayadangelou.awsapps.com/start
+  SSO_REGION: us-east-1
+  AWS_ACCOUNT_ID: "445985103066"
 
 tasks:
+  # =========================================================================
+  # Reviewer Onboarding
+  # =========================================================================
+
+  reviewer:check:
+    desc: Check that required tools are installed
+    silent: true
+    cmds:
+      - |
+        ok=true
+        for tool in aws terraform task; do
+          if command -v "$tool" > /dev/null 2>&1; then
+            printf "  ✓ %-12s %s\n" "$tool" "$(command -v $tool)"
+          else
+            printf "  ✗ %-12s MISSING\n" "$tool"
+            ok=false
+          fi
+        done
+        if [ "$ok" = false ]; then
+          echo ""
+          echo "Install missing tools:"
+          echo "  AWS CLI:   https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+          echo "  Terraform: https://developer.hashicorp.com/terraform/install"
+          echo "  Task:      https://taskfile.dev/installation"
+          exit 1
+        fi
+        echo ""
+        echo "All tools installed."
+
+  reviewer:sso:
+    desc: Configure AWS SSO profile for reviewer access
+    deps: [reviewer:check]
+    cmds:
+      - |
+        echo "================================================"
+        echo "  Data Lake Platform — SSO Setup"
+        echo "================================================"
+        echo ""
+        echo "This will create an AWS CLI profile named 'data-lake'"
+        echo "using the SSO credentials provided in the submission."
+        echo ""
+        echo "SSO Portal: {{.SSO_START_URL}}"
+        echo "Region:     {{.SSO_REGION}}"
+        echo "Account:    {{.AWS_ACCOUNT_ID}}"
+        echo ""
+
+        # Write the SSO config directly (no interactive prompts)
+        mkdir -p ~/.aws
+        if grep -q '\[profile data-lake\]' ~/.aws/config 2>/dev/null; then
+          echo "Profile 'data-lake' already exists in ~/.aws/config."
+          echo "To reconfigure, remove the existing profile and re-run."
+        else
+          cat >> ~/.aws/config << 'SSOCONFIG'
+
+        [profile data-lake]
+        sso_start_url = {{.SSO_START_URL}}
+        sso_region = {{.SSO_REGION}}
+        sso_account_id = {{.AWS_ACCOUNT_ID}}
+        sso_role_name = Reviewer
+        region = {{.SSO_REGION}}
+        output = json
+        SSOCONFIG
+          echo "Created AWS profile 'data-lake' in ~/.aws/config"
+        fi
+
+        echo ""
+        echo "Next: Log in with the credentials from the submission notes:"
+        echo ""
+        echo "  aws sso login --profile data-lake"
+        echo ""
+        echo "Then verify access:"
+        echo ""
+        echo "  task reviewer:verify"
+
+  reviewer:login:
+    desc: Log in to AWS via SSO (opens browser)
+    cmds:
+      - aws sso login --profile data-lake
+
+  reviewer:verify:
+    desc: Verify AWS access and show platform status
+    preconditions:
+      - sh: aws sts get-caller-identity --profile data-lake > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - |
+        echo "================================================"
+        echo "  Data Lake Platform — Status Check"
+        echo "================================================"
+        echo ""
+
+        echo "--- Identity ---"
+        AWS_PROFILE=data-lake aws sts get-caller-identity --output table
+        echo ""
+
+        echo "--- Glue Databases (6 expected) ---"
+        AWS_PROFILE=data-lake aws glue get-databases \
+          --query 'DatabaseList[].Name' --output table
+        echo ""
+
+        echo "--- MSK Connect Connectors (3 expected: RUNNING) ---"
+        AWS_PROFILE=data-lake aws kafkaconnect list-connectors \
+          --query 'connectors[].{Name:connectorName,State:connectorState}' --output table
+        echo ""
+
+        echo "--- Glue ETL Jobs (4 expected) ---"
+        AWS_PROFILE=data-lake aws glue get-jobs \
+          --query 'Jobs[].{Name:Name,Workers:NumberOfWorkers}' --output table
+        echo ""
+
+        echo "--- Latest Glue Workflow Run ---"
+        AWS_PROFILE=data-lake aws glue get-workflow-runs \
+          --name datalake-medallion-prod --max-results 1 \
+          --query 'Runs[0].{Status:Status,Started:StartedOn,Completed:CompletedOn}' --output table
+        echo ""
+
+        echo "--- Lambda Trading Simulator ---"
+        AWS_PROFILE=data-lake aws lambda get-function \
+          --function-name datalake-trading-simulator-prod \
+          --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Memory:MemorySize}' --output table
+        echo ""
+
+        echo "All checks complete. Run 'task athena:demo' to query data."
+
+  reviewer:sample-queries:
+    desc: Run sample Athena queries across all medallion layers
+    preconditions:
+      - sh: aws sts get-caller-identity --profile data-lake > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - |
+        echo "================================================"
+        echo "  Row Counts Across All Layers"
+        echo "================================================"
+        echo ""
+
+        for tbl in "raw_mnpi_prod.orders" "raw_mnpi_prod.trades" "raw_mnpi_prod.positions" \
+                    "raw_nonmnpi_prod.market_data" \
+                    "curated_mnpi_prod.order_events" "curated_nonmnpi_prod.market_ticks" \
+                    "analytics_mnpi_prod.order_summary" "analytics_nonmnpi_prod.market_summary"; do
+          QID=$(AWS_PROFILE=data-lake aws athena start-query-execution \
+            --query-string "SELECT '$tbl' AS tbl, count(*) AS rows FROM $tbl" \
+            --work-group data-engineers-prod \
+            --query 'QueryExecutionId' --output text)
+          while true; do
+            STATE=$(AWS_PROFILE=data-lake aws athena get-query-execution \
+              --query-execution-id "$QID" \
+              --query 'QueryExecution.Status.State' --output text)
+            if [ "$STATE" = "SUCCEEDED" ]; then
+              AWS_PROFILE=data-lake aws athena get-query-results \
+                --query-execution-id "$QID" \
+                --query 'ResultSet.Rows[1].Data[*].VarCharValue' --output text
+              break
+            elif [ "$STATE" = "FAILED" ] || [ "$STATE" = "CANCELLED" ]; then
+              echo "$tbl: QUERY FAILED"
+              break
+            fi
+            sleep 1
+          done
+        done
+
+  reviewer:access-control-demo:
+    desc: Demonstrate Lake Formation access control (MNPI denied for DataAnalyst)
+    preconditions:
+      - sh: aws sts get-caller-identity --profile data-lake > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - |
+        echo "================================================"
+        echo "  Access Control Demo"
+        echo "================================================"
+        echo ""
+        echo "To test access control, log into the SSO portal with different roles:"
+        echo "  {{.SSO_START_URL}}"
+        echo ""
+        echo "As FinanceAnalyst (finance-analysts-prod workgroup):"
+        echo "  SELECT count(*) FROM curated_mnpi_prod.order_events;  -- SUCCEEDS"
+        echo "  SELECT count(*) FROM raw_mnpi_prod.orders;            -- DENIED (raw layer)"
+        echo ""
+        echo "As DataAnalyst (data-analysts-prod workgroup):"
+        echo "  SELECT count(*) FROM curated_nonmnpi_prod.market_ticks;  -- SUCCEEDS"
+        echo "  SELECT count(*) FROM curated_mnpi_prod.order_events;     -- DENIED (MNPI)"
+        echo ""
+        echo "As DataEngineer (data-engineers-prod workgroup):"
+        echo "  SELECT count(*) FROM raw_mnpi_prod.orders;  -- SUCCEEDS (full access)"
+
   # =========================================================================
   # AWS Infrastructure
   # =========================================================================
@@ -79,14 +268,17 @@ tasks:
     desc: Run demo queries showing end-to-end data flow
     cmds:
       - |
-        echo "=== MNPI Order Events (count) ==="
-        task athena:query QUERY="SELECT count(*) AS mnpi_rows FROM raw_mnpi_dev.mnpi_events"
+        echo "=== Raw MNPI Orders (count) ==="
+        task athena:query QUERY="SELECT count(*) AS raw_orders FROM raw_mnpi_{{.TF_WORKSPACE | default \"prod\"}}.orders"
         echo ""
-        echo "=== Non-MNPI Market Data (count) ==="
-        task athena:query QUERY="SELECT count(*) AS nonmnpi_rows FROM raw_nonmnpi_dev.nonmnpi_events"
+        echo "=== Raw Non-MNPI Market Data (count) ==="
+        task athena:query QUERY="SELECT count(*) AS raw_ticks FROM raw_nonmnpi_{{.TF_WORKSPACE | default \"prod\"}}.market_data"
         echo ""
-        echo "=== MNPI: Event Type Breakdown ==="
-        task athena:query QUERY="SELECT event_type, count(*) AS cnt FROM raw_mnpi_dev.mnpi_events GROUP BY event_type ORDER BY cnt DESC"
+        echo "=== Curated Order Events ==="
+        task athena:query QUERY="SELECT count(*) AS curated_orders FROM curated_mnpi_{{.TF_WORKSPACE | default \"prod\"}}.order_events"
         echo ""
-        echo "=== Non-MNPI: Price Summary by Ticker ==="
-        task athena:query QUERY="SELECT ticker, count(*) AS ticks, round(avg(CAST(last_price AS double)),2) AS avg_price FROM raw_nonmnpi_dev.nonmnpi_events GROUP BY ticker ORDER BY ticks DESC"
+        echo "=== Analytics: Order Summary by Instrument ==="
+        task athena:query QUERY="SELECT instrument_id, total_orders, buy_orders, sell_orders, total_volume FROM analytics_mnpi_{{.TF_WORKSPACE | default \"prod\"}}.order_summary ORDER BY total_orders DESC"
+        echo ""
+        echo "=== Analytics: Market Summary by Ticker ==="
+        task athena:query QUERY="SELECT ticker, tick_count, avg_price, avg_spread, spread_pct FROM analytics_nonmnpi_{{.TF_WORKSPACE | default \"prod\"}}.market_summary ORDER BY tick_count DESC"

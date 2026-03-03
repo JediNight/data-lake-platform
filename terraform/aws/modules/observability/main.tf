@@ -353,6 +353,10 @@ resource "aws_quicksight_account_subscription" "this" {
   edition               = "STANDARD"
   authentication_method = "IAM_AND_QUICKSIGHT"
   notification_email    = "admin@example.com"
+
+  lifecycle {
+    ignore_changes = [authentication_method]
+  }
 }
 
 # -----------------------------------------------------------------------------
