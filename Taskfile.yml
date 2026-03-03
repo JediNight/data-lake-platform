@@ -2,7 +2,6 @@ version: '3'
 
 vars:
   TF_AWS_DIR: terraform/aws
-  TF_LOCAL_DIR: terraform/local
   CLUSTER_NAME: data-lake
   AWS_PROFILE_NAME: data-lake
   SSO_START_URL: https://mayadangelou.awsapps.com/start
@@ -238,9 +237,10 @@ tasks:
     desc: "Spin up local dev environment: Kind cluster + ArgoCD + Strimzi + PostgreSQL + Producer API"
     deps: [dev:check]
     cmds:
-      # Phase 1: Terraform creates Kind cluster + ArgoCD + root Application
-      - terraform -chdir={{.TF_LOCAL_DIR}} init -upgrade
-      - terraform -chdir={{.TF_LOCAL_DIR}} apply -auto-approve
+      # Phase 1: Terraform creates Kind cluster + ArgoCD + AWS infra (dev workspace)
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} init -upgrade
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} workspace select dev
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} apply -var-file=dev.tfvars -auto-approve
 
       # Phase 2: Build & load custom Kafka Connect image (Strimzi needs this)
       - |
@@ -317,7 +317,8 @@ tasks:
     desc: Tear down local dev environment completely
     cmds:
       - cd dev && tilt down 2>/dev/null || true
-      - terraform -chdir={{.TF_LOCAL_DIR}} destroy -auto-approve 2>/dev/null || true
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} workspace select dev 2>/dev/null || true
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} destroy -var-file=dev.tfvars -auto-approve 2>/dev/null || true
       - kind delete cluster --name {{.CLUSTER_NAME}} 2>/dev/null || true
       - echo "Local dev environment torn down."
 

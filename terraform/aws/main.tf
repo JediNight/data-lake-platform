@@ -22,6 +22,22 @@ terraform {
       source  = "hashicorp/null"
       version = "~> 3.0"
     }
+    kind = {
+      source  = "tehcyx/kind"
+      version = "~> 0.7"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.17"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.35"
+    }
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = "~> 1.18"
+    }
   }
 }
 
@@ -35,6 +51,32 @@ provider "aws" {
       ManagedBy   = "terraform"
     }
   }
+}
+
+provider "kind" {}
+
+provider "helm" {
+  kubernetes {
+    host                   = try(kind_cluster.this[0].endpoint, "")
+    client_certificate     = try(kind_cluster.this[0].client_certificate, "")
+    client_key             = try(kind_cluster.this[0].client_key, "")
+    cluster_ca_certificate = try(kind_cluster.this[0].cluster_ca_certificate, "")
+  }
+}
+
+provider "kubernetes" {
+  host                   = try(kind_cluster.this[0].endpoint, "")
+  client_certificate     = try(kind_cluster.this[0].client_certificate, "")
+  client_key             = try(kind_cluster.this[0].client_key, "")
+  cluster_ca_certificate = try(kind_cluster.this[0].cluster_ca_certificate, "")
+}
+
+provider "kubectl" {
+  host                   = try(kind_cluster.this[0].endpoint, "")
+  client_certificate     = try(kind_cluster.this[0].client_certificate, "")
+  client_key             = try(kind_cluster.this[0].client_key, "")
+  cluster_ca_certificate = try(kind_cluster.this[0].cluster_ca_certificate, "")
+  load_config_file       = false
 }
 
 data "aws_caller_identity" "current" {}
@@ -272,4 +314,77 @@ module "lambda_producer" {
 
   schedule_enabled = true
   tags             = {}
+}
+
+# =============================================================================
+# Local Dev Environment (dev only — Kind cluster + ArgoCD + Strimzi)
+# =============================================================================
+
+resource "kind_cluster" "this" {
+  count           = local.c.enable_local_dev ? 1 : 0
+  name            = var.kind_cluster_name
+  wait_for_ready  = true
+  kubeconfig_path = pathexpand(var.kubeconfig_path)
+
+  kind_config {
+    kind        = "Cluster"
+    api_version = "kind.x-k8s.io/v1alpha4"
+
+    networking {
+      pod_subnet     = "10.244.0.0/16"
+      service_subnet = "10.96.0.0/12"
+    }
+
+    node {
+      role  = "control-plane"
+      image = "kindest/node:v1.31.2"
+
+      labels = {
+        "ingress-ready" = "true"
+      }
+
+      extra_port_mappings {
+        container_port = 30080
+        host_port      = 8080
+        protocol       = "TCP"
+      }
+
+      extra_mounts {
+        host_path      = abspath("${path.module}/../..")
+        container_path = "/mnt/data-lake-platform"
+        read_only      = true
+      }
+    }
+
+    node {
+      role  = "worker"
+      image = "kindest/node:v1.31.2"
+
+      labels = {
+        "workload" = "applications"
+      }
+
+      extra_mounts {
+        host_path      = abspath("${path.module}/../..")
+        container_path = "/mnt/data-lake-platform"
+        read_only      = true
+      }
+
+      extra_mounts {
+        host_path      = pathexpand("~/.aws")
+        container_path = "/mnt/aws"
+        read_only      = true
+      }
+    }
+  }
+}
+
+module "local_dev" {
+  source = "./modules/local-dev"
+  count  = local.c.enable_local_dev ? 1 : 0
+
+  cluster_name    = var.kind_cluster_name
+  kubeconfig_path = kind_cluster.this[0].kubeconfig_path
+
+  depends_on = [kind_cluster.this]
 }

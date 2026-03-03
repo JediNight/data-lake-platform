@@ -7,6 +7,9 @@ locals {
   # ---------------------------------------------------------------------------
   config = {
     dev = {
+      # Local dev environment (Kind + ArgoCD + Strimzi)
+      enable_local_dev = true
+
       # MSK
       broker_instance_type       = "kafka.t3.small"
       broker_count               = 1
@@ -46,6 +49,9 @@ locals {
     }
 
     prod = {
+      # Local dev environment (not used in prod)
+      enable_local_dev = false
+
       # MSK
       broker_instance_type       = "kafka.m5.large"
       broker_count               = 2 # Must be multiple of AZ count (2 AZs)

@@ -15,3 +15,16 @@ variable "admin_role_arn" {
   type        = string
   default     = ""
 }
+
+# Local dev variables (Kind cluster — dev workspace only)
+variable "kind_cluster_name" {
+  description = "Name of the Kind cluster for local dev"
+  type        = string
+  default     = "data-lake"
+}
+
+variable "kubeconfig_path" {
+  description = "Path to save Kind kubeconfig"
+  type        = string
+  default     = "~/.kube/config"
+}
