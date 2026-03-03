@@ -8,12 +8,16 @@
 set -euo pipefail
 
 ENV="${1:?Usage: $0 <environment>}"
-CLUSTER_ARN=$(aws rds describe-db-clusters \
-  --db-cluster-identifier "datalake-${ENV}" \
-  --query 'DBClusters[0].DBClusterArn' --output text)
-SECRET_ARN=$(aws secretsmanager describe-secret \
-  --secret-id "datalake/aurora/${ENV}/master-password" \
-  --query 'ARN' --output text)
+if [[ -z "${CLUSTER_ARN:-}" ]]; then
+  CLUSTER_ARN=$(aws rds describe-db-clusters \
+    --db-cluster-identifier "datalake-${ENV}" \
+    --query 'DBClusters[0].DBClusterArn' --output text)
+fi
+if [[ -z "${SECRET_ARN:-}" ]]; then
+  SECRET_ARN=$(aws secretsmanager describe-secret \
+    --secret-id "datalake/aurora/${ENV}/master-password" \
+    --query 'ARN' --output text)
+fi
 DATABASE="trading"
 
 echo "==> Cluster: ${CLUSTER_ARN}"

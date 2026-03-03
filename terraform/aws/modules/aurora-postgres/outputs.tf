@@ -32,3 +32,8 @@ output "security_group_id" {
   description = "Aurora security group ID"
   value       = aws_security_group.this.id
 }
+
+output "cdc_setup_complete" {
+  description = "CDC setup null_resource ID — dependency trigger for downstream modules"
+  value       = null_resource.cdc_setup.id
+}

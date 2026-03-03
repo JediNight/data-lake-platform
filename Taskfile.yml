@@ -2,6 +2,8 @@ version: '3'
 
 vars:
   TF_AWS_DIR: terraform/aws
+  TF_LOCAL_DIR: terraform/local
+  CLUSTER_NAME: data-lake
   SSO_START_URL: https://mayadangelou.awsapps.com/start
   SSO_REGION: us-east-1
   AWS_ACCOUNT_ID: "445985103066"
@@ -192,6 +194,108 @@ tasks:
         echo ""
         echo "As DataEngineer (data-engineers-prod workgroup):"
         echo "  SELECT count(*) FROM raw_mnpi_prod.orders;  -- SUCCEEDS (full access)"
+
+  reviewer:e2e:
+    desc: "End-to-end pipeline test: invoke Lambda → verify data lands in S3 via CDC (~3 min)"
+    preconditions:
+      - sh: aws sts get-caller-identity --profile data-lake > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - bash scripts/verify-e2e-pipeline.sh {{.TF_WORKSPACE | default "prod"}}
+
+  # =========================================================================
+  # Local Dev (Kind + ArgoCD + Strimzi)
+  # =========================================================================
+
+  dev:check:
+    desc: Check local dev tools are installed (kind, tilt, helm, kubectl, kustomize)
+    silent: true
+    cmds:
+      - |
+        ok=true
+        for tool in kind tilt helm kubectl kustomize docker; do
+          if command -v "$tool" > /dev/null 2>&1; then
+            printf "  ✓ %-12s %s\n" "$tool" "$(command -v $tool)"
+          else
+            printf "  ✗ %-12s MISSING\n" "$tool"
+            ok=false
+          fi
+        done
+        if [ "$ok" = false ]; then
+          echo ""
+          echo "Install missing tools:"
+          echo "  Kind:      https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
+          echo "  Tilt:      https://docs.tilt.dev/install.html"
+          echo "  Helm:      https://helm.sh/docs/intro/install/"
+          echo "  Kustomize: https://kubectl.docs.kubernetes.io/installation/kustomize/"
+          exit 1
+        fi
+        echo ""
+        echo "All dev tools installed."
+
+  dev:up:
+    desc: "Spin up local dev environment: Kind cluster + ArgoCD + Strimzi + PostgreSQL + Producer API"
+    deps: [dev:check]
+    cmds:
+      - terraform -chdir={{.TF_LOCAL_DIR}} init -upgrade
+      - terraform -chdir={{.TF_LOCAL_DIR}} apply -auto-approve
+      - |
+        echo ""
+        echo "Waiting for ArgoCD applications to sync..."
+        kubectl config use-context kind-{{.CLUSTER_NAME}}
+        kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy \
+          applications --all --timeout=300s 2>/dev/null || true
+      - task: dev:status
+
+  dev:down:
+    desc: Tear down local dev environment completely
+    cmds:
+      - cd dev && tilt down || true
+      - terraform -chdir={{.TF_LOCAL_DIR}} destroy -auto-approve
+
+  dev:tilt:
+    desc: Start Tilt dev loop (Kind cluster must exist)
+    dir: dev
+    cmds:
+      - tilt up
+
+  dev:status:
+    desc: Show local dev cluster status (pods, apps, connectors)
+    cmds:
+      - |
+        echo "================================================"
+        echo "  Local Dev Environment — Status"
+        echo "================================================"
+        echo ""
+        echo "--- Kind Cluster ---"
+        kind get clusters 2>/dev/null | grep {{.CLUSTER_NAME}} || echo "NOT RUNNING"
+        echo ""
+        echo "--- ArgoCD Applications ---"
+        kubectl -n argocd get applications 2>/dev/null || echo "ArgoCD not ready"
+        echo ""
+        echo "--- Strimzi (Kafka + Connect) ---"
+        kubectl -n strimzi get pods 2>/dev/null || echo "Strimzi not ready"
+        echo ""
+        echo "--- Data Namespace (PostgreSQL + Producer API) ---"
+        kubectl -n data get pods 2>/dev/null || echo "Data namespace not ready"
+        echo ""
+        echo "--- Kafka Connectors ---"
+        kubectl -n strimzi get kafkaconnectors 2>/dev/null || echo "No connectors"
+
+  dev:argocd-password:
+    desc: Get ArgoCD admin password for local dev
+    cmds:
+      - |
+        echo "ArgoCD Admin Password:"
+        kubectl -n argocd get secret argocd-initial-admin-secret \
+          -o jsonpath='{.data.password}' | base64 -d && echo
+        echo ""
+        echo "ArgoCD UI: http://localhost:8080"
+
+  dev:test:
+    desc: Run local integration tests (Kind cluster must be running)
+    cmds:
+      - bash scripts/integration/run-tests.sh
 
   # =========================================================================
   # AWS Infrastructure

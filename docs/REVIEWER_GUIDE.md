@@ -31,7 +31,11 @@ task reviewer:login
 # 4. Verify everything works
 task reviewer:verify
 
-# 5. Query data across all layers
+# 5. Run end-to-end pipeline test (~3 min)
+#    Invokes Lambda → verifies data flows through Aurora → Debezium → MSK → Iceberg → S3
+task reviewer:e2e
+
+# 6. Query data across all layers
 task reviewer:sample-queries
 ```
 
@@ -489,6 +493,7 @@ task reviewer:check              # Verify tools installed (aws, terraform, task)
 task reviewer:sso                # Configure AWS SSO profile (one-time)
 task reviewer:login              # Log in via SSO (opens browser)
 task reviewer:verify             # Status check: databases, connectors, jobs, Lambda
+task reviewer:e2e                # End-to-end pipeline test: Lambda → Aurora → CDC → S3 (~3 min)
 task reviewer:sample-queries     # Row counts across all 8 tables
 task reviewer:access-control-demo # Instructions for testing ABAC with different roles
 

@@ -18,6 +18,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -123,6 +127,7 @@ module "service_roles" {
   ]
 
   # Aurora secret for Debezium CDC (Kafka Connect SecretsManagerConfigProvider)
+  enable_aurora     = local.c.enable_aurora
   aurora_secret_arn = local.c.enable_aurora ? module.aurora_postgres[0].master_password_secret_arn : ""
 
   # EKS removed — serverless architecture (Lambda + MSK Connect)
@@ -243,6 +248,7 @@ module "msk_connect" {
   postgres_endpoint         = local.c.enable_aurora ? module.aurora_postgres[0].cluster_endpoint : ""
   postgres_port             = local.c.enable_aurora ? module.aurora_postgres[0].cluster_port : 5432
   aurora_secret_arn         = local.c.enable_aurora ? module.aurora_postgres[0].master_password_secret_arn : ""
+  aurora_cdc_setup_id       = local.c.enable_aurora ? module.aurora_postgres[0].cdc_setup_complete : ""
 }
 
 # =============================================================================

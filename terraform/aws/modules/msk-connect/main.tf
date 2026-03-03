@@ -111,9 +111,19 @@ resource "aws_mskconnect_worker_configuration" "this" {
 }
 
 # =============================================================================
+# CDC Ready Gate — blocks Debezium until Aurora CDC setup is complete
+# =============================================================================
+
+resource "null_resource" "cdc_ready_gate" {
+  count = var.enable_debezium_connector ? 1 : 0
+  triggers = {
+    cdc_setup_id = var.aurora_cdc_setup_id
+  }
+}
+
+# =============================================================================
 # Debezium Source Connector
 # Requires Aurora CDC setup: replication slot, publication, Secrets Manager password.
-# Set enable_debezium_connector = true once Aurora CDC is configured.
 # =============================================================================
 
 resource "aws_mskconnect_connector" "debezium_source" {
@@ -210,6 +220,10 @@ resource "aws_mskconnect_connector" "debezium_source" {
       }
     }
   }
+
+  depends_on = [
+    null_resource.cdc_ready_gate,
+  ]
 }
 
 # =============================================================================

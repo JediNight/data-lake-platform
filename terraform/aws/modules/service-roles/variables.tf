@@ -74,6 +74,12 @@ variable "query_results_bucket_arn" {
   type        = string
 }
 
+variable "enable_aurora" {
+  description = "Whether Aurora is enabled (controls conditional resources)"
+  type        = bool
+  default     = false
+}
+
 variable "aurora_secret_arn" {
   description = "ARN of the Aurora master password Secrets Manager secret (for Debezium CDC)"
   type        = string

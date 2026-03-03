@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer-api
+  labels:
+    app: producer-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: producer-api
+  template:
+    metadata:
+      labels:
+        app: producer-api
+    spec:
+      containers:
+        - name: producer-api
+          image: producer-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "PLACEHOLDER"
+            - name: POSTGRES_DSN
+              value: "PLACEHOLDER"
+            - name: SIMULATION_ENABLED
+              value: "false"
+            - name: SIMULATION_INTERVAL_SECONDS
+              value: "5"
+          volumeMounts:
+            - name: seed-data
+              mountPath: /etc/producer-api
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: seed-data
+          configMap:
+            name: producer-api-seed-data

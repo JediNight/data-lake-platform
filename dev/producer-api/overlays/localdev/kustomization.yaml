@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: data
+resources:
+  - ../../base
+patches:
+  - path: deployment-patch.yaml
+images:
+  - name: producer-api
+    newName: producer-api
+    newTag: localdev-1772326913

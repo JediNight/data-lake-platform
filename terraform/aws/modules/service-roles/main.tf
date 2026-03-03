@@ -218,7 +218,7 @@ resource "aws_iam_role_policy" "kafka_connect_kms" {
 }
 
 resource "aws_iam_role_policy" "kafka_connect_secrets" {
-  count = var.aurora_secret_arn != "" ? 1 : 0
+  count = var.enable_aurora ? 1 : 0
 
   name = "secretsmanager-aurora-read"
   role = aws_iam_role.kafka_connect.id

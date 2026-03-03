@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: producer-api
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - list:
+        elements:
+          - cluster: localdev
+  template:
+    metadata:
+      name: 'producer-api-{{ .cluster }}'
+    spec:
+      project: default
+      source:
+        repoURL: file:///mnt/data-lake-platform
+        targetRevision: HEAD
+        path: 'dev/producer-api/overlays/{{ .cluster }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: data
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

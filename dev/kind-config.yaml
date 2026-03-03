@@ -1,0 +1,41 @@
+# Kind Cluster Configuration for data-lake-platform
+# Reference template — the actual cluster is created by terraform/local/main.tf.
+# Uses envsubst variables: PROJECT_ROOT (repo root) and HOME (user home).
+# Usage: PROJECT_ROOT=$(pwd) envsubst < kind-config.yaml | kind create cluster --config -
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: data-lake
+
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # ArgoCD UI
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+    extraMounts:
+      - hostPath: ${PROJECT_ROOT}
+        containerPath: /mnt/data-lake-platform
+        readOnly: true
+
+  - role: worker
+    labels:
+      workload: applications
+    extraMounts:
+      - hostPath: ${PROJECT_ROOT}
+        containerPath: /mnt/data-lake-platform
+        readOnly: true
+      - hostPath: ${HOME}/.aws
+        containerPath: /mnt/aws
+        readOnly: true
+
+networking:
+  disableDefaultCNI: false
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

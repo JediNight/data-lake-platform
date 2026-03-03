@@ -127,3 +127,27 @@ resource "aws_rds_cluster_instance" "this" {
   engine             = "aurora-postgresql"
   engine_version     = var.engine_version
 }
+
+# -----------------------------------------------------------------------------
+# CDC Setup (creates trading tables + Debezium publication via RDS Data API)
+# -----------------------------------------------------------------------------
+
+resource "null_resource" "cdc_setup" {
+  triggers = {
+    cluster_arn = aws_rds_cluster.this.arn
+    secret_arn  = aws_secretsmanager_secret.master_password.arn
+  }
+
+  provisioner "local-exec" {
+    command = "bash ${path.module}/../../../../scripts/init-aurora-cdc.sh ${var.environment}"
+    environment = {
+      CLUSTER_ARN = aws_rds_cluster.this.arn
+      SECRET_ARN  = aws_secretsmanager_secret.master_password.arn
+    }
+  }
+
+  depends_on = [
+    aws_rds_cluster_instance.this,
+    aws_secretsmanager_secret_version.master_password,
+  ]
+}

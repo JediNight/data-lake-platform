@@ -77,3 +77,9 @@ variable "default_replication_factor" {
   type        = number
   default     = 2
 }
+
+variable "aurora_cdc_setup_id" {
+  description = "CDC setup null_resource ID from aurora-postgres module"
+  type        = string
+  default     = ""
+}

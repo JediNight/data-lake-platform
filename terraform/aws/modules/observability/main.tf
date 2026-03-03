@@ -422,7 +422,7 @@ resource "aws_iam_role_policy" "quicksight_s3_and_glue" {
 }
 
 resource "aws_iam_role_policy" "quicksight_kms" {
-  count = var.enable_quicksight && var.quicksight_kms_key_arn != "" ? 1 : 0
+  count = var.enable_quicksight ? 1 : 0
 
   name = "datalake-kms-access"
   role = data.aws_iam_role.quicksight_service[0].name
