@@ -4,6 +4,7 @@ vars:
   TF_AWS_DIR: terraform/aws
   TF_LOCAL_DIR: terraform/local
   CLUSTER_NAME: data-lake
+  AWS_PROFILE_NAME: data-lake
   SSO_START_URL: https://mayadangelou.awsapps.com/start
   SSO_REGION: us-east-1
   AWS_ACCOUNT_ID: "445985103066"
@@ -47,7 +48,7 @@ tasks:
         echo "  Data Lake Platform — SSO Setup"
         echo "================================================"
         echo ""
-        echo "This will create an AWS CLI profile named 'data-lake'"
+        echo "This will create an AWS CLI profile named '{{.AWS_PROFILE_NAME}}'"
         echo "using the SSO credentials provided in the submission."
         echo ""
         echo "SSO Portal: {{.SSO_START_URL}}"
@@ -57,13 +58,13 @@ tasks:
 
         # Write the SSO config directly (no interactive prompts)
         mkdir -p ~/.aws
-        if grep -q '\[profile data-lake\]' ~/.aws/config 2>/dev/null; then
-          echo "Profile 'data-lake' already exists in ~/.aws/config."
+        if grep -q '\[profile {{.AWS_PROFILE_NAME}}\]' ~/.aws/config 2>/dev/null; then
+          echo "Profile '{{.AWS_PROFILE_NAME}}' already exists in ~/.aws/config."
           echo "To reconfigure, remove the existing profile and re-run."
         else
           cat >> ~/.aws/config << 'SSOCONFIG'
 
-        [profile data-lake]
+        [profile {{.AWS_PROFILE_NAME}}]
         sso_start_url = {{.SSO_START_URL}}
         sso_region = {{.SSO_REGION}}
         sso_account_id = {{.AWS_ACCOUNT_ID}}
@@ -71,13 +72,13 @@ tasks:
         region = {{.SSO_REGION}}
         output = json
         SSOCONFIG
-          echo "Created AWS profile 'data-lake' in ~/.aws/config"
+          echo "Created AWS profile '{{.AWS_PROFILE_NAME}}' in ~/.aws/config"
         fi
 
         echo ""
         echo "Next: Log in with the credentials from the submission notes:"
         echo ""
-        echo "  aws sso login --profile data-lake"
+        echo "  aws sso login --profile {{.AWS_PROFILE_NAME}}"
         echo ""
         echo "Then verify access:"
         echo ""
@@ -86,12 +87,12 @@ tasks:
   reviewer:login:
     desc: Log in to AWS via SSO (opens browser)
     cmds:
-      - aws sso login --profile data-lake
+      - aws sso login --profile {{.AWS_PROFILE_NAME}}
 
   reviewer:verify:
     desc: Verify AWS access and show platform status
     preconditions:
-      - sh: aws sts get-caller-identity --profile data-lake > /dev/null 2>&1
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
         msg: "Not logged in. Run: task reviewer:login"
     cmds:
       - |
@@ -101,32 +102,32 @@ tasks:
         echo ""
 
         echo "--- Identity ---"
-        AWS_PROFILE=data-lake aws sts get-caller-identity --output table
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws sts get-caller-identity --output table
         echo ""
 
         echo "--- Glue Databases (6 expected) ---"
-        AWS_PROFILE=data-lake aws glue get-databases \
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws glue get-databases \
           --query 'DatabaseList[].Name' --output table
         echo ""
 
         echo "--- MSK Connect Connectors (3 expected: RUNNING) ---"
-        AWS_PROFILE=data-lake aws kafkaconnect list-connectors \
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws kafkaconnect list-connectors \
           --query 'connectors[].{Name:connectorName,State:connectorState}' --output table
         echo ""
 
         echo "--- Glue ETL Jobs (4 expected) ---"
-        AWS_PROFILE=data-lake aws glue get-jobs \
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws glue get-jobs \
           --query 'Jobs[].{Name:Name,Workers:NumberOfWorkers}' --output table
         echo ""
 
         echo "--- Latest Glue Workflow Run ---"
-        AWS_PROFILE=data-lake aws glue get-workflow-runs \
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws glue get-workflow-runs \
           --name datalake-medallion-prod --max-results 1 \
           --query 'Runs[0].{Status:Status,Started:StartedOn,Completed:CompletedOn}' --output table
         echo ""
 
         echo "--- Lambda Trading Simulator ---"
-        AWS_PROFILE=data-lake aws lambda get-function \
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws lambda get-function \
           --function-name datalake-trading-simulator-prod \
           --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Memory:MemorySize}' --output table
         echo ""
@@ -136,7 +137,7 @@ tasks:
   reviewer:sample-queries:
     desc: Run sample Athena queries across all medallion layers
     preconditions:
-      - sh: aws sts get-caller-identity --profile data-lake > /dev/null 2>&1
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
         msg: "Not logged in. Run: task reviewer:login"
     cmds:
       - |
@@ -149,16 +150,16 @@ tasks:
                     "raw_nonmnpi_prod.market_data" \
                     "curated_mnpi_prod.order_events" "curated_nonmnpi_prod.market_ticks" \
                     "analytics_mnpi_prod.order_summary" "analytics_nonmnpi_prod.market_summary"; do
-          QID=$(AWS_PROFILE=data-lake aws athena start-query-execution \
+          QID=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena start-query-execution \
             --query-string "SELECT '$tbl' AS tbl, count(*) AS rows FROM $tbl" \
             --work-group data-engineers-prod \
             --query 'QueryExecutionId' --output text)
           while true; do
-            STATE=$(AWS_PROFILE=data-lake aws athena get-query-execution \
+            STATE=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-execution \
               --query-execution-id "$QID" \
               --query 'QueryExecution.Status.State' --output text)
             if [ "$STATE" = "SUCCEEDED" ]; then
-              AWS_PROFILE=data-lake aws athena get-query-results \
+              AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-results \
                 --query-execution-id "$QID" \
                 --query 'ResultSet.Rows[1].Data[*].VarCharValue' --output text
               break
@@ -173,7 +174,7 @@ tasks:
   reviewer:access-control-demo:
     desc: Demonstrate Lake Formation access control (MNPI denied for DataAnalyst)
     preconditions:
-      - sh: aws sts get-caller-identity --profile data-lake > /dev/null 2>&1
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
         msg: "Not logged in. Run: task reviewer:login"
     cmds:
       - |
@@ -198,7 +199,7 @@ tasks:
   reviewer:e2e:
     desc: "End-to-end pipeline test: invoke Lambda → verify data lands in S3 via CDC (~3 min)"
     preconditions:
-      - sh: aws sts get-caller-identity --profile data-lake > /dev/null 2>&1
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
         msg: "Not logged in. Run: task reviewer:login"
     cmds:
       - bash scripts/verify-e2e-pipeline.sh {{.TF_WORKSPACE | default "prod"}}
@@ -252,17 +253,26 @@ tasks:
         kind load docker-image data-lake-connect:with-aws-v8 --name {{.CLUSTER_NAME}}
 
       # Phase 3: Create AWS credentials secret for Iceberg S3 writes
+      #   Uses the AWS_PROFILE_NAME variable (must match `task reviewer:sso`)
       - |
         echo ""
         echo "Creating AWS credentials secret for Kafka Connect..."
+        echo "  (using AWS profile: {{.AWS_PROFILE_NAME}})"
         kubectl config use-context kind-{{.CLUSTER_NAME}}
         kubectl create namespace strimzi 2>/dev/null || true
         if kubectl -n strimzi get secret aws-credentials > /dev/null 2>&1; then
           echo "  aws-credentials secret already exists, recreating..."
           kubectl -n strimzi delete secret aws-credentials
         fi
+        if ! aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1; then
+          echo ""
+          echo "ERROR: Not logged in to AWS profile '{{.AWS_PROFILE_NAME}}'."
+          echo "Run:  task reviewer:sso   (one-time setup)"
+          echo "Then: task reviewer:login  (opens browser)"
+          exit 1
+        fi
         TMPDIR=$(mktemp -d)
-        aws configure export-credentials --profile data-lake --format process \
+        aws configure export-credentials --profile {{.AWS_PROFILE_NAME}} --format process \
           | python3 -c "
         import json, sys
         c = json.load(sys.stdin)
@@ -297,11 +307,9 @@ tasks:
         echo "================================================"
         echo "  ArgoCD UI"
         echo "================================================"
-        PASS=$(kubectl -n argocd get secret argocd-initial-admin-secret \
-          -o jsonpath='{.data.password}' | base64 -d)
         echo "  URL:      http://localhost:8080"
         echo "  Username: admin"
-        echo "  Password: ${PASS}"
+        echo "  Password: datalake-admin"
         echo ""
         echo "Run 'task dev:tilt' for the inner dev loop."
 
@@ -346,11 +354,9 @@ tasks:
     desc: Get ArgoCD admin password for local dev
     cmds:
       - |
-        echo "ArgoCD Admin Password:"
-        kubectl -n argocd get secret argocd-initial-admin-secret \
-          -o jsonpath='{.data.password}' | base64 -d && echo
-        echo ""
-        echo "ArgoCD UI: http://localhost:8080"
+        echo "ArgoCD UI:  http://localhost:8080"
+        echo "Username:   admin"
+        echo "Password:   datalake-admin"
 
   dev:test:
     desc: Run local integration tests (Kind cluster must be running)
@@ -405,22 +411,22 @@ tasks:
     desc: Run an Athena query and wait for results (QUERY="SELECT ...")
     cmds:
       - |
-        QID=$(AWS_PROFILE=data-lake aws athena start-query-execution \
+        QID=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena start-query-execution \
           --query-string "{{.QUERY}}" \
           --work-group {{.WORKGROUP | default "data-engineers-dev"}} \
           --query 'QueryExecutionId' --output text)
         echo "Query ID: $QID"
         echo "Waiting..."
         while true; do
-          STATE=$(AWS_PROFILE=data-lake aws athena get-query-execution \
+          STATE=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-execution \
             --query-execution-id "$QID" \
             --query 'QueryExecution.Status.State' --output text)
           if [ "$STATE" = "SUCCEEDED" ]; then
-            AWS_PROFILE=data-lake aws athena get-query-results \
+            AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-results \
               --query-execution-id "$QID" --output table
             break
           elif [ "$STATE" = "FAILED" ] || [ "$STATE" = "CANCELLED" ]; then
-            AWS_PROFILE=data-lake aws athena get-query-execution \
+            AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-execution \
               --query-execution-id "$QID" \
               --query 'QueryExecution.Status.StateChangeReason' --output text
             break

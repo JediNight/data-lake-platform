@@ -6,6 +6,8 @@ global:
     level: warn
 
 configs:
+  secret:
+    argocdServerAdminPassword: "$2b$12$MWOUpEZGo.rFhSKn7q9UaesiN8Luf77HUqPsuphBPFxXIdc6vprtq"  # datalake-admin
   params:
     server.insecure: "true"
     server.enable.gzip: "true"
