@@ -11,6 +11,7 @@ variable "vpc_cidr" {
 }
 
 variable "admin_role_arn" {
-  description = "IAM role ARN for Lake Formation admin"
+  description = "IAM role ARN for Lake Formation admin (defaults to current caller)"
   type        = string
+  default     = ""
 }

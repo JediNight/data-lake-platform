@@ -68,6 +68,18 @@ locals {
 }
 
 # =============================================================================
+# Data Sources
+# =============================================================================
+
+data "aws_caller_identity" "current" {}
+
+# Resolve the STS session ARN to the permanent IAM role ARN.
+# Lake Formation rejects assumed-role (temporary credential) ARNs.
+data "aws_iam_session_context" "current" {
+  arn = data.aws_caller_identity.current.arn
+}
+
+# =============================================================================
 # Lake Formation Data Lake Settings
 # =============================================================================
 # Set the admin principal and override the default IAMAllowedPrincipals so
@@ -76,7 +88,7 @@ locals {
 # =============================================================================
 
 resource "aws_lakeformation_data_lake_settings" "this" {
-  admins = [var.admin_role_arn]
+  admins = [var.admin_role_arn != "" ? var.admin_role_arn : data.aws_iam_session_context.current.issuer_arn]
 
   # Omitting create_database_default_permissions and
   # create_table_default_permissions removes the default
