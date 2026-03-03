@@ -38,3 +38,6 @@ htmlcov/
 
 # Tilt
 tilt_modules/
+
+# Plans
+docs/plans/
