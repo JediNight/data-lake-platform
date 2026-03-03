@@ -237,21 +237,81 @@ tasks:
     desc: "Spin up local dev environment: Kind cluster + ArgoCD + Strimzi + PostgreSQL + Producer API"
     deps: [dev:check]
     cmds:
+      # Phase 1: Terraform creates Kind cluster + ArgoCD + root Application
       - terraform -chdir={{.TF_LOCAL_DIR}} init -upgrade
       - terraform -chdir={{.TF_LOCAL_DIR}} apply -auto-approve
+
+      # Phase 2: Build & load custom Kafka Connect image (Strimzi needs this)
+      - |
+        echo ""
+        echo "Building Kafka Connect image with Iceberg JARs..."
+        docker build -t data-lake-connect:with-aws-v8 \
+          -f dev/gitops/strimzi/docker/Dockerfile.connect \
+          dev/gitops/strimzi/docker/
+        echo "Loading image into Kind cluster..."
+        kind load docker-image data-lake-connect:with-aws-v8 --name {{.CLUSTER_NAME}}
+
+      # Phase 3: Create AWS credentials secret for Iceberg S3 writes
+      - |
+        echo ""
+        echo "Creating AWS credentials secret for Kafka Connect..."
+        kubectl config use-context kind-{{.CLUSTER_NAME}}
+        kubectl create namespace strimzi 2>/dev/null || true
+        if kubectl -n strimzi get secret aws-credentials > /dev/null 2>&1; then
+          echo "  aws-credentials secret already exists, recreating..."
+          kubectl -n strimzi delete secret aws-credentials
+        fi
+        TMPDIR=$(mktemp -d)
+        aws configure export-credentials --profile data-lake --format process \
+          | python3 -c "
+        import json, sys
+        c = json.load(sys.stdin)
+        with open('${TMPDIR}/credentials', 'w') as f:
+            f.write('[default]\n')
+            f.write(f'aws_access_key_id = {c[\"AccessKeyId\"]}\n')
+            f.write(f'aws_secret_access_key = {c[\"SecretAccessKey\"]}\n')
+            f.write(f'aws_session_token = {c[\"SessionToken\"]}\n')
+        "
+        cat > "${TMPDIR}/config" << AWSEOF
+        [default]
+        region = {{.SSO_REGION}}
+        output = json
+        AWSEOF
+        kubectl -n strimzi create secret generic aws-credentials \
+          --from-file=credentials="${TMPDIR}/credentials" \
+          --from-file=config="${TMPDIR}/config"
+        rm -rf "${TMPDIR}"
+        echo "  aws-credentials secret created."
+
+      # Phase 4: Wait for ArgoCD to reconcile everything
       - |
         echo ""
         echo "Waiting for ArgoCD applications to sync..."
-        kubectl config use-context kind-{{.CLUSTER_NAME}}
         kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy \
           applications --all --timeout=300s 2>/dev/null || true
+
+      # Phase 5: Show status + ArgoCD credentials
       - task: dev:status
+      - |
+        echo ""
+        echo "================================================"
+        echo "  ArgoCD UI"
+        echo "================================================"
+        PASS=$(kubectl -n argocd get secret argocd-initial-admin-secret \
+          -o jsonpath='{.data.password}' | base64 -d)
+        echo "  URL:      http://localhost:8080"
+        echo "  Username: admin"
+        echo "  Password: ${PASS}"
+        echo ""
+        echo "Run 'task dev:tilt' for the inner dev loop."
 
   dev:down:
     desc: Tear down local dev environment completely
     cmds:
-      - cd dev && tilt down || true
-      - terraform -chdir={{.TF_LOCAL_DIR}} destroy -auto-approve
+      - cd dev && tilt down 2>/dev/null || true
+      - terraform -chdir={{.TF_LOCAL_DIR}} destroy -auto-approve 2>/dev/null || true
+      - kind delete cluster --name {{.CLUSTER_NAME}} 2>/dev/null || true
+      - echo "Local dev environment torn down."
 
   dev:tilt:
     desc: Start Tilt dev loop (Kind cluster must exist)
