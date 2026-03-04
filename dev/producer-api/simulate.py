@@ -81,7 +81,7 @@ async def run(cycles: int, interval: float) -> None:
                 order_id = await conn.fetchval(
                     """INSERT INTO orders (account_id, instrument_id, side, quantity,
                            order_type, limit_price, status)
-                       VALUES ($1,$2,$3,$4,$5,$6,'NEW') RETURNING order_id""",
+                       VALUES ($1,$2,$3,$4,$5,$6,'PENDING') RETURNING order_id""",
                     acct, iid, side, qty, otype, limit_px,
                 )
 
@@ -129,11 +129,11 @@ async def run(cycles: int, interval: float) -> None:
             qty_delta = qty if side == "BUY" else -qty
             async with pool.acquire() as conn:
                 await conn.execute(
-                    """INSERT INTO positions (account_id, instrument_id, quantity, avg_price, updated_at)
-                       VALUES ($1, $2, $3, $4, NOW())
-                       ON CONFLICT (account_id, instrument_id) DO UPDATE
+                    """INSERT INTO positions (account_id, instrument_id, quantity, market_value, position_date, updated_at)
+                       VALUES ($1, $2, $3, $4, CURRENT_DATE, NOW())
+                       ON CONFLICT (account_id, instrument_id, position_date) DO UPDATE
                        SET quantity = positions.quantity + $3,
-                           avg_price = $4,
+                           market_value = $4,
                            updated_at = NOW()""",
                     acct, iid, qty_delta, exec_px,
                 )
