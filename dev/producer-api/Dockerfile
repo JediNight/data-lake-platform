@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 COPY simulate.py .
+COPY simulate_nonmnpi.py .
 
 EXPOSE 8000
 

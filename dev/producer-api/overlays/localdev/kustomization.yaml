@@ -6,6 +6,7 @@ resources:
 patches:
   - path: deployment-patch.yaml
   - path: cronjob-patch.yaml
+  - path: cronjob-nonmnpi-patch.yaml
 images:
   - name: producer-api
     newName: producer-api
