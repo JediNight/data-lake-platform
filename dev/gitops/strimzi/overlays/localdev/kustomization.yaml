@@ -4,6 +4,8 @@ namespace: strimzi
 resources:
   - ../../base
   - kafka-cluster.yaml
+generators:
+  - secret-generator.yaml
 patches:
   - path: debezium-source-patch.yaml
     target:

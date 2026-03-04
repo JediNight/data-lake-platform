@@ -252,46 +252,10 @@ tasks:
         echo "Loading image into Kind cluster..."
         kind load docker-image data-lake-connect:with-aws-v8 --name {{.CLUSTER_NAME}}
 
-      # Phase 3: Create AWS credentials secret for Iceberg S3 writes
-      #   Uses the AWS_PROFILE_NAME variable (must match `task reviewer:sso`)
-      - |
-        echo ""
-        echo "Creating AWS credentials secret for Kafka Connect..."
-        echo "  (using AWS profile: {{.AWS_PROFILE_NAME}})"
-        kubectl config use-context kind-{{.CLUSTER_NAME}}
-        kubectl create namespace strimzi 2>/dev/null || true
-        if kubectl -n strimzi get secret aws-credentials > /dev/null 2>&1; then
-          echo "  aws-credentials secret already exists, recreating..."
-          kubectl -n strimzi delete secret aws-credentials
-        fi
-        if ! aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1; then
-          echo ""
-          echo "ERROR: Not logged in to AWS profile '{{.AWS_PROFILE_NAME}}'."
-          echo "Run:  task reviewer:sso   (one-time setup)"
-          echo "Then: task reviewer:login  (opens browser)"
-          exit 1
-        fi
-        TMPDIR=$(mktemp -d)
-        aws configure export-credentials --profile {{.AWS_PROFILE_NAME}} --format process \
-          | python3 -c "
-        import json, sys
-        c = json.load(sys.stdin)
-        with open('${TMPDIR}/credentials', 'w') as f:
-            f.write('[default]\n')
-            f.write(f'aws_access_key_id = {c[\"AccessKeyId\"]}\n')
-            f.write(f'aws_secret_access_key = {c[\"SecretAccessKey\"]}\n')
-            f.write(f'aws_session_token = {c[\"SessionToken\"]}\n')
-        "
-        cat > "${TMPDIR}/config" << AWSEOF
-        [default]
-        region = {{.SSO_REGION}}
-        output = json
-        AWSEOF
-        kubectl -n strimzi create secret generic aws-credentials \
-          --from-file=credentials="${TMPDIR}/credentials" \
-          --from-file=config="${TMPDIR}/config"
-        rm -rf "${TMPDIR}"
-        echo "  aws-credentials secret created."
+      # Phase 3: AWS credentials are now managed by KSOPS (secret-generator.yaml
+      #   in dev/gitops/strimzi/overlays/localdev/). ArgoCD decrypts the
+      #   encrypted secret.enc.yaml and applies it automatically on sync.
+      #   Run 'task dev:refresh-creds' to re-encrypt after SSO token refresh.
 
       # Phase 4: Wait for ArgoCD to reconcile everything
       - |
@@ -312,6 +276,50 @@ tasks:
         echo "  Password: datalake-admin"
         echo ""
         echo "Run 'task dev:tilt' for the inner dev loop."
+
+  dev:refresh-creds:
+    desc: "Refresh AWS credentials in KSOPS encrypted secret (run after 'aws sso login')"
+    cmds:
+      - |
+        if ! aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1; then
+          echo "ERROR: Not logged in to AWS profile '{{.AWS_PROFILE_NAME}}'."
+          echo "Run:  task reviewer:login"
+          exit 1
+        fi
+        TMPDIR=$(mktemp -d)
+        aws configure export-credentials --profile {{.AWS_PROFILE_NAME}} --format process \
+          | python3 -c "
+        import json, sys
+        c = json.load(sys.stdin)
+        print('[default]')
+        print(f'aws_access_key_id = {c[\"AccessKeyId\"]}')
+        print(f'aws_secret_access_key = {c[\"SecretAccessKey\"]}')
+        print(f'aws_session_token = {c[\"SessionToken\"]}')
+        " > "${TMPDIR}/credentials"
+
+        SECRET_FILE=dev/gitops/strimzi/overlays/localdev/secret.yaml
+        cat > "${SECRET_FILE}" << ENDOFSECRET
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: aws-credentials
+        type: Opaque
+        stringData:
+          credentials: |
+        $(sed 's/^/        /' "${TMPDIR}/credentials")
+          config: |
+            [default]
+            region = {{.SSO_REGION}}
+            output = json
+        ENDOFSECRET
+
+        cd dev && SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
+          sops -e gitops/strimzi/overlays/localdev/secret.yaml \
+          > gitops/strimzi/overlays/localdev/secret.enc.yaml
+        rm -f gitops/strimzi/overlays/localdev/secret.yaml
+        rm -rf "${TMPDIR}"
+        echo "Encrypted credentials updated in secret.enc.yaml."
+        echo "ArgoCD will sync automatically (or run: task dev:argocd-sync)."
 
   dev:down:
     desc: Tear down local dev environment completely

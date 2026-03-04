@@ -8,9 +8,11 @@
 # Claude Code worktrees
 .worktrees/
 
-# SOPS
+# SOPS — plaintext secrets (only encrypted .enc.yaml committed)
 *.dec
 keys.txt
+**/secret.yaml
+!**/secret.enc.yaml
 
 # IDE
 .idea/
