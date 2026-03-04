@@ -1,36 +1,48 @@
 FROM index.docker.io/tfawibe/data-lake-connect@sha256:37de0c857ae791804e13853632bf7b088b8214afaae6aaf5bb24ef7eacbd5ef0
 
+# Remove 1.8.1 Iceberg JARs from base image (replaced by 1.9.0 below)
+USER root
+RUN rm -f /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-api-1.8.1.jar \
+          /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-bundled-guava-1.8.1.jar \
+          /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-common-1.8.1.jar \
+          /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-core-1.8.1.jar \
+          /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-data-1.8.1.jar \
+          /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-kafka-connect-1.8.1.jar \
+          /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-kafka-connect-events-1.8.1.jar
+
+# Iceberg 1.9.0 — full replacement of all Iceberg modules
+# iceberg-api/common/core/data: core Iceberg table API and metadata
+# iceberg-bundled-guava: relocated Guava classes (required by all Iceberg modules)
+# iceberg-kafka-connect: Kafka Connect sink connector
+# iceberg-kafka-connect-events: commit coordination events
+# iceberg-kafka-connect-transforms: DebeziumTransform to unwrap CDC envelope
 # iceberg-aws: S3FileIO, GlueCatalog, DynamoDB lock manager
-# iceberg-aws-bundle: shaded AWS SDK v2 transitive deps for iceberg-aws
-# iceberg-parquet: Parquet read/write support (default Iceberg file format)
-# hadoop-client-api: Hadoop API classes (Configuration, Path, FileSystem) compiled against shaded deps
-# hadoop-client-runtime: shaded third-party deps (woodstox, guava, protobuf) for hadoop-client-api
-# failsafe: retry/circuit-breaker lib used by S3FileIO (transitive dep of iceberg-aws)
-# iceberg-kafka-connect-transforms: DebeziumTransform to unwrap CDC envelope (before/after/source/op → flat columns)
-# postgresql JDBC driver: required by JdbcCatalog for metadata storage
+# iceberg-aws-bundle: shaded AWS SDK v2 transitive deps
+# iceberg-parquet: Parquet read/write support
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-api/1.9.0/iceberg-api-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-bundled-guava/1.9.0/iceberg-bundled-guava-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-common/1.9.0/iceberg-common-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-core/1.9.0/iceberg-core-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-data/1.9.0/iceberg-data-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-kafka-connect/1.9.0/iceberg-kafka-connect-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-kafka-connect-events/1.9.0/iceberg-kafka-connect-events-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-kafka-connect-transforms/1.9.0/iceberg-kafka-connect-transforms-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws/1.9.0/iceberg-aws-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.9.0/iceberg-aws-bundle-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-parquet/1.9.0/iceberg-parquet-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
-ADD https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-kafka-connect-transforms/1.9.0/iceberg-kafka-connect-transforms-1.9.0.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+
+# Non-Iceberg deps (unchanged)
+# hadoop-client: Hadoop API + shaded runtime deps
+# failsafe: retry/circuit-breaker for S3FileIO
+# postgresql: JDBC driver for JdbcCatalog
 ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-api/3.4.1/hadoop-client-api-3.4.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.4.1/hadoop-client-runtime-3.4.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/dev/failsafe/failsafe/3.3.2/failsafe-3.3.2.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 
 # AWS Glue Schema Registry Avro Converter (shaded uber-jar, ~64MB)
-# Enables Avro schema validation against AWS Glue Schema Registry for
-# Debezium source (CDC events) and Iceberg sink (deserialization).
-# Schemas are auto-registered with BACKWARD compatibility enforcement.
 ADD https://repo1.maven.org/maven2/software/amazon/glue/schema-registry-kafkaconnect-converter/1.1.27/schema-registry-kafkaconnect-converter-1.1.27.jar /opt/kafka/libs/
 
-USER root
-RUN chmod 644 /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-aws-1.9.0.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-aws-bundle-1.9.0.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-parquet-1.9.0.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-kafka-connect-transforms-1.9.0.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/hadoop-client-api-3.4.1.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/hadoop-client-runtime-3.4.1.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/failsafe-3.3.2.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/postgresql-42.7.4.jar \
+RUN chmod 644 /opt/kafka/plugins/iceberg-sink/3f1b5581/*.jar \
               /opt/kafka/libs/schema-registry-kafkaconnect-converter-1.1.27.jar
 USER 1001
