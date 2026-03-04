@@ -138,17 +138,21 @@ def main():
     print("=" * 70)
     print("""
 Enforcement layers:
-  1. Glue Schema Registry  — Avro schemas with BACKWARD compatibility
-                             (prevents breaking schema changes)
-  2. PostgreSQL constraints — CHECK constraints on status, side, order_type,
-                             disclosure_status columns
-  3. Debezium CDC schemas  — Full struct schema embedded in every CDC event
-                             (downstream consumers get typed data)
-  4. Avro serialization    — Rejects invalid types, missing fields, bad enums
-                             at publish time (demonstrated above)
+  1. AWS Glue Schema Registry — Avro schemas with BACKWARD compatibility
+     (prevents breaking schema changes; central schema governance)
+  2. Kafka Connect Avro Converter (AWSKafkaAvroConverter)
+     — Debezium source serializes CDC events as Avro, registering schemas
+       in Glue Schema Registry with schemaAutoRegistrationEnabled=true
+     — Iceberg sinks deserialize Avro, validating against registered schemas
+     — Invalid data is REJECTED at serialization time (type mismatch,
+       missing fields, enum violations)
+  3. PostgreSQL CHECK constraints — status, side, order_type,
+     disclosure_status columns enforced at the database level
+  4. Avro serialization (demonstrated above) — Rejects invalid types,
+     missing fields, bad enums before data enters the pipeline
 
 Zone isolation:
-  - MNPI topics:    cdc.trading.orders, cdc.trading.trades, cdc.trading.positions
+  - MNPI topics:     cdc.trading.orders, cdc.trading.trades, cdc.trading.positions
   - Non-MNPI topics: cdc.trading.accounts, cdc.trading.instruments, market-data.ticks
   - Separate Iceberg sinks write to isolated S3 paths (mnpi/ vs nonmnpi/)
 """)
