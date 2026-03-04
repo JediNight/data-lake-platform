@@ -13,10 +13,6 @@ spec:
     iceberg.catalog.s3.region: "us-east-1"
     iceberg.tables: "default.nonmnpi_events"
 
-    # Unwrap Debezium CDC envelope (before/after/source/op → flat columns)
-    transforms: "debezium"
-    transforms.debezium.type: "org.apache.iceberg.connect.transforms.DebeziumTransform"
-
     # Avro schema validation via AWS Glue Schema Registry
     value.converter: "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
     value.converter.region: "us-east-1"

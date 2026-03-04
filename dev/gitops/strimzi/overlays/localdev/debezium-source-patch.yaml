@@ -9,10 +9,17 @@ spec:
     database.user: "postgres"
     database.password: "postgres"
 
+    # Unwrap Debezium CDC envelope on source side so sinks receive flat records.
+    # Chained after dropSchemaFromTopic (defined in base).
+    transforms: "dropSchemaFromTopic,unwrap"
+    transforms.dropSchemaFromTopic.type: "org.apache.kafka.connect.transforms.RegexRouter"
+    transforms.dropSchemaFromTopic.regex: "(.+)\\.public\\.(.*)"
+    transforms.dropSchemaFromTopic.replacement: "$1.$2"
+    transforms.unwrap.type: "io.debezium.transforms.ExtractNewRecordState"
+    transforms.unwrap.drop.tombstones: "true"
+    transforms.unwrap.delete.handling.mode: "drop"
+
     # Avro schema validation via AWS Glue Schema Registry
-    # Every CDC event is serialized as Avro and validated against the
-    # auto-registered schema. Schema changes are enforced with BACKWARD
-    # compatibility (Glue registry default).
     value.converter: "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
     value.converter.region: "us-east-1"
     value.converter.registry.name: "datalake-schemas-dev"
