@@ -46,6 +46,22 @@ module "identity_center" {
 }
 
 # =============================================================================
+# KMS Key Lookups (alias → actual key ARN)
+# =============================================================================
+# KMS alias ARNs cannot be used in IAM policy Resource elements for operations
+# initiated by S3 SSE-KMS (S3 calls KMS using the key ARN, not the alias).
+# Resolve aliases to actual key ARNs for IAM policies.
+# =============================================================================
+
+data "aws_kms_alias" "mnpi" {
+  name = "alias/datalake-mnpi-${local.env}"
+}
+
+data "aws_kms_alias" "nonmnpi" {
+  name = "alias/datalake-nonmnpi-${local.env}"
+}
+
+# =============================================================================
 # Service Roles (Kafka Connect + Glue ETL IAM roles)
 # =============================================================================
 
@@ -57,9 +73,10 @@ module "service_roles" {
   glue_registry_arn  = local.glue_registry_arn
   msk_cluster_arn    = local.msk_cluster_arn
 
-  # KMS alias ARNs (not key ARNs — key IDs are non-deterministic UUIDs)
-  mnpi_kms_key_arn         = local.mnpi_kms_alias_arn
-  nonmnpi_kms_key_arn      = local.nonmnpi_kms_alias_arn
+  # Actual key ARNs (resolved from aliases — alias ARNs don't work in IAM
+  # policy Resource elements for S3 SSE-KMS initiated operations)
+  mnpi_kms_key_arn         = data.aws_kms_alias.mnpi.target_key_arn
+  nonmnpi_kms_key_arn      = data.aws_kms_alias.nonmnpi.target_key_arn
   query_results_bucket_arn = local.query_results_bucket_arn
 
   extra_s3_read_bucket_arns = [

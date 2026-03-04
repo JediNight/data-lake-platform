@@ -43,6 +43,6 @@ locals {
   nonmnpi_bucket_id        = "datalake-nonmnpi-${local.env}"
   query_results_bucket_id  = "datalake-query-results-${local.account_id}-${local.env}"
   nonmnpi_kms_alias_arn    = "arn:aws:kms:${local.region}:${local.account_id}:alias/datalake-nonmnpi-${local.env}"
-  kafka_connect_role_arn   = "arn:aws:iam::${local.account_id}:role/datalake-kafka-connect-${local.env}"
-  glue_etl_role_arn        = "arn:aws:iam::${local.account_id}:role/datalake-glue-etl-${local.env}"
+  kafka_connect_role_arn   = "arn:aws:iam::${local.account_id}:role/datalake/datalake-kafka-connect-${local.env}"
+  glue_etl_role_arn        = "arn:aws:iam::${local.account_id}:role/datalake/datalake-glue-etl-${local.env}"
 }

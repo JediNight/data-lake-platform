@@ -45,8 +45,8 @@ locals {
   aurora_secret_arn = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:datalake/aurora/${local.env}/master-password-*"
 
   # IAM service role ARNs (deterministic)
-  kafka_connect_role_arn = "arn:aws:iam::${local.account_id}:role/datalake-kafka-connect-${local.env}"
-  glue_etl_role_arn      = "arn:aws:iam::${local.account_id}:role/datalake-glue-etl-${local.env}"
+  kafka_connect_role_arn = "arn:aws:iam::${local.account_id}:role/datalake/datalake-kafka-connect-${local.env}"
+  glue_etl_role_arn      = "arn:aws:iam::${local.account_id}:role/datalake/datalake-glue-etl-${local.env}"
 
   # SSO role pattern (for bucket DENY policy exemption)
   sso_data_engineer_role_pattern = "arn:aws:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_DataEngineer_*"
