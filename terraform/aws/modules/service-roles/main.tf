@@ -19,6 +19,9 @@ terraform {
   }
 }
 
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
 locals {
   common_tags = merge(var.tags, {
     Module      = "service-roles"
@@ -212,7 +215,12 @@ resource "aws_iam_role_policy" "kafka_connect_kms" {
       Sid      = "KMSDecryptEncrypt"
       Effect   = "Allow"
       Action   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
-      Resource = [var.mnpi_kms_key_arn, var.nonmnpi_kms_key_arn]
+      Resource = "arn:aws:kms:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:key/*"
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "s3.${data.aws_region.current.id}.amazonaws.com"
+        }
+      }
     }]
   })
 }
@@ -301,7 +309,12 @@ resource "aws_iam_role_policy" "glue_etl_kms" {
       Sid      = "KMSDecryptEncrypt"
       Effect   = "Allow"
       Action   = ["kms:Decrypt", "kms:GenerateDataKey", "kms:DescribeKey"]
-      Resource = [var.mnpi_kms_key_arn, var.nonmnpi_kms_key_arn]
+      Resource = "arn:aws:kms:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:key/*"
+      Condition = {
+        StringEquals = {
+          "kms:ViaService" = "s3.${data.aws_region.current.id}.amazonaws.com"
+        }
+      }
     }]
   })
 }
