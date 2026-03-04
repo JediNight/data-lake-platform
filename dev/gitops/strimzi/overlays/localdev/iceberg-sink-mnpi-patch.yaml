@@ -4,19 +4,17 @@ metadata:
   name: iceberg-sink-mnpi
 spec:
   config:
-    iceberg.catalog.type: "jdbc"
-    iceberg.catalog.uri: "jdbc:postgresql://sample-postgres.data.svc.cluster.local:5432/trading"
-    iceberg.catalog.jdbc.user: "postgres"
-    iceberg.catalog.jdbc.password: "postgres"
-    iceberg.catalog.warehouse: "s3://datalake-local-iceberg-dev/mnpi"
+    iceberg.catalog.type: "glue"
+    iceberg.catalog.warehouse: "s3://datalake-mnpi-dev/"
     iceberg.catalog.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
     iceberg.catalog.s3.region: "us-east-1"
-    # Route each CDC topic to its own Iceberg table
-    iceberg.tables: "default.orders,default.trades,default.positions"
+    iceberg.catalog.glue.region: "us-east-1"
+    # Route each CDC topic to its own Iceberg table in raw_mnpi_dev database
+    iceberg.tables: "raw_mnpi_dev.orders,raw_mnpi_dev.trades,raw_mnpi_dev.positions"
     iceberg.tables.route-field: "_topic"
-    iceberg.table.default.orders.route-regex: "cdc\\.trading\\.orders"
-    iceberg.table.default.trades.route-regex: "cdc\\.trading\\.trades"
-    iceberg.table.default.positions.route-regex: "cdc\\.trading\\.positions"
+    iceberg.table.raw_mnpi_dev.orders.route-regex: "cdc\\.trading\\.orders"
+    iceberg.table.raw_mnpi_dev.trades.route-regex: "cdc\\.trading\\.trades"
+    iceberg.table.raw_mnpi_dev.positions.route-regex: "cdc\\.trading\\.positions"
 
     # Inject topic name into records for routing
     transforms: "insertTopic"

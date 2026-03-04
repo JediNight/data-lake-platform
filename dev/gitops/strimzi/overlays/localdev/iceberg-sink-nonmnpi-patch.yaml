@@ -4,19 +4,17 @@ metadata:
   name: iceberg-sink-nonmnpi
 spec:
   config:
-    iceberg.catalog.type: "jdbc"
-    iceberg.catalog.uri: "jdbc:postgresql://sample-postgres.data.svc.cluster.local:5432/trading"
-    iceberg.catalog.jdbc.user: "postgres"
-    iceberg.catalog.jdbc.password: "postgres"
-    iceberg.catalog.warehouse: "s3://datalake-local-iceberg-dev/nonmnpi"
+    iceberg.catalog.type: "glue"
+    iceberg.catalog.warehouse: "s3://datalake-nonmnpi-dev/"
     iceberg.catalog.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
     iceberg.catalog.s3.region: "us-east-1"
-    # Route each CDC topic to its own Iceberg table
+    iceberg.catalog.glue.region: "us-east-1"
+    # Route each CDC topic to its own Iceberg table in raw_nonmnpi_dev database
     # NOTE: stream.market-data excluded — requires Avro producer (future work)
-    iceberg.tables: "default.accounts,default.instruments"
+    iceberg.tables: "raw_nonmnpi_dev.accounts,raw_nonmnpi_dev.instruments"
     iceberg.tables.route-field: "_topic"
-    iceberg.table.default.accounts.route-regex: "cdc\\.trading\\.accounts"
-    iceberg.table.default.instruments.route-regex: "cdc\\.trading\\.instruments"
+    iceberg.table.raw_nonmnpi_dev.accounts.route-regex: "cdc\\.trading\\.accounts"
+    iceberg.table.raw_nonmnpi_dev.instruments.route-regex: "cdc\\.trading\\.instruments"
 
     # Inject topic name into records for routing
     transforms: "insertTopic"
