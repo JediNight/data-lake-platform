@@ -99,6 +99,19 @@ resource "aws_kms_key" "mnpi" {
         ]
         Resource = "*"
       },
+      {
+        Sid    = "AllowLakeFormationDataAccessRole"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${local.account_id}:role/aws-service-role/lakeformation.amazonaws.com/AWSServiceRoleForLakeFormationDataAccess"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey",
+        ]
+        Resource = "*"
+      },
     ]
   })
 
@@ -150,6 +163,19 @@ resource "aws_kms_key" "nonmnpi" {
         Effect = "Allow"
         Principal = {
           Service = "s3.amazonaws.com"
+        }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:DescribeKey",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowLakeFormationDataAccessRole"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${local.account_id}:role/aws-service-role/lakeformation.amazonaws.com/AWSServiceRoleForLakeFormationDataAccess"
         }
         Action = [
           "kms:Decrypt",

@@ -38,8 +38,8 @@ INSTRUMENTS = [
 
 ACCOUNT_IDS = [1, 2, 3, 4, 5]
 
-POSTGRES_DSN = "postgresql://postgres:postgres@localhost:5432/trading"
-KAFKA_BOOTSTRAP = "localhost:9092"
+POSTGRES_DSN = "postgresql://postgres:postgres@sample-postgres.data.svc.cluster.local:5432/trading"
+KAFKA_BOOTSTRAP = "data-lake-kafka-kafka-bootstrap.strimzi.svc.cluster.local:9092"
 MARKET_DATA_TOPIC = "market-data.ticks"
 
 price_book = {i["ticker"]: Decimal(i["price"]) for i in INSTRUMENTS}

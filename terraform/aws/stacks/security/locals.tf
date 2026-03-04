@@ -5,7 +5,7 @@ locals {
 
   config = {
     dev = {
-      enable_quicksight    = false
+      enable_quicksight    = true
       audit_retention_days = 90
       enable_aurora        = false
     }
@@ -49,15 +49,22 @@ locals {
   glue_etl_role_arn      = "arn:aws:iam::${local.account_id}:role/datalake/datalake-glue-etl-${local.env}"
 
   # SSO role patterns (for bucket DENY policy exemption)
-  sso_data_engineer_role_pattern = "arn:aws:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_DataEngineer_*"
-  sso_admin_role_pattern         = "arn:aws:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_AdministratorAccess_*"
+  # NOTE: path may or may not include a region segment (e.g. us-east-1/)
+  sso_data_engineer_role_pattern = "arn:aws:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_DataEngineer_*"
+  sso_admin_role_pattern         = "arn:aws:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_AdministratorAccess_*"
+  sso_reviewer_role_arn          = "arn:aws:iam::${local.account_id}:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_Reviewer_bdf4a9c7ce608ce6"
+
+  # Lake Formation service-linked role (used by Athena for Iceberg writes)
+  lf_data_access_role_arn = "arn:aws:iam::${local.account_id}:role/aws-service-role/lakeformation.amazonaws.com/AWSServiceRoleForLakeFormationDataAccess"
 
   # Exempt principals for bucket DENY policies
   bucket_deny_exempt_arns = [
     local.sso_data_engineer_role_pattern,
     local.sso_admin_role_pattern,
+    local.sso_reviewer_role_arn,
     local.kafka_connect_role_arn,
     local.glue_etl_role_arn,
+    local.lf_data_access_role_arn,
   ]
 
   # Glue database names (deterministic from naming convention)

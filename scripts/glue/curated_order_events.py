@@ -5,7 +5,7 @@ Source: raw_mnpi_{env}.orders   (Iceberg, CDC from Debezium via MSK Connect)
 Target: curated_mnpi_{env}.order_events (Iceberg, deduplicated + typed)
 
 Transform logic:
-  1. Filter out CDC deletes (_cdc.op != 'd') and tombstones
+  1. Filter out CDC deletes (_cdc.op != 'd') and tombstones (when CDC metadata present)
   2. Cast string fields to proper types (quantity -> bigint, limit_price -> double,
      created_at/updated_at -> timestamp)
   3. Deduplicate by order_id (latest updated_at wins via ROW_NUMBER)
@@ -68,10 +68,14 @@ source_table = f"glue_catalog.raw_mnpi_{env}.orders"
 df = spark.table(source_table)
 
 # 1. Filter out CDC deletes and tombstones
-df_filtered = df.filter(
-    (F.col("_cdc.op") != "d")
-    & F.col("order_id").isNotNull()
-)
+#    Prod uses DebeziumTransform (preserves _cdc.op); local dev uses
+#    ExtractNewRecordState (unwraps envelope, no _cdc columns).
+if "_cdc" in df.columns:
+    df_filtered = df.filter(
+        (F.col("_cdc.op") != "d") & F.col("order_id").isNotNull()
+    )
+else:
+    df_filtered = df.filter(F.col("order_id").isNotNull())
 
 # 2. Deduplicate by order_id (latest updated_at wins)
 window = Window.partitionBy("order_id").orderBy(F.col("updated_at").desc())

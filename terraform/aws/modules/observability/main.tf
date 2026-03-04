@@ -346,16 +346,22 @@ resource "aws_glue_catalog_table" "cloudtrail_logs" {
 # data source are placeholders for future build-out.
 # =============================================================================
 
+# Resolve KMS alias to actual key ARN (aliases don't work in IAM Resource)
+data "aws_kms_key" "quicksight" {
+  count  = var.enable_quicksight && var.quicksight_kms_key_arn != "" ? 1 : 0
+  key_id = var.quicksight_kms_key_arn
+}
+
 resource "aws_quicksight_account_subscription" "this" {
   count = var.enable_quicksight ? 1 : 0
 
-  account_name          = "datalake-${var.account_id}-${var.environment}"
+  account_name          = "datalake-${var.account_id}"
   edition               = "STANDARD"
   authentication_method = "IAM_AND_QUICKSIGHT"
   notification_email    = "admin@example.com"
 
   lifecycle {
-    ignore_changes = [authentication_method]
+    ignore_changes = [account_name, authentication_method]
   }
 }
 
@@ -417,6 +423,14 @@ resource "aws_iam_role_policy" "quicksight_s3_and_glue" {
           "${var.query_results_bucket_arn}/*",
         ]
       },
+      {
+        Sid    = "LakeFormationDataAccess"
+        Effect = "Allow"
+        Action = [
+          "lakeformation:GetDataAccess",
+        ]
+        Resource = "*"
+      },
     ]
   })
 }
@@ -437,7 +451,7 @@ resource "aws_iam_role_policy" "quicksight_kms" {
         "kms:GenerateDataKey",
         "kms:DescribeKey",
       ]
-      Resource = var.quicksight_kms_key_arn
+      Resource = data.aws_kms_key.quicksight[0].arn
     }]
   })
 }

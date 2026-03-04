@@ -21,6 +21,12 @@ spec:
     value.converter: org.apache.kafka.connect.json.JsonConverter
     key.converter.schemas.enable: false
     value.converter.schemas.enable: true
+    # Iceberg sink fix: worker control consumer polls during preCommit(),
+    # which fires every offset.flush.interval.ms. Default (60s) exceeds the
+    # broker session.timeout.ms (45s), so the worker consumer session expires
+    # before the next poll → permanent UNKNOWN_MEMBER_ID re-join loop → 0
+    # tables committed. Setting to 10s keeps the session alive.
+    offset.flush.interval.ms: 10000
   build:
     output:
       type: docker

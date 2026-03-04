@@ -460,3 +460,104 @@ resource "aws_lakeformation_permissions" "kafka_connect_data_location" {
     aws_lakeformation_resource.nonmnpi_bucket,
   ]
 }
+
+# =============================================================================
+# QuickSight Service Role — Read-Only Database & Table Permissions
+# =============================================================================
+# QuickSight needs DESCRIBE on all databases and SELECT+DESCRIBE on all tables
+# to display the Glue catalog in its dataset picker.  Grants are only created
+# when a quicksight_role_arn is provided.
+# =============================================================================
+
+resource "aws_lakeformation_permissions" "quicksight_databases" {
+  for_each = var.quicksight_role_arn != "" ? var.database_names : {}
+
+  principal   = var.quicksight_role_arn
+  permissions = ["DESCRIBE"]
+
+  database {
+    name = each.value
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+  ]
+}
+
+resource "aws_lakeformation_permissions" "quicksight_tables" {
+  for_each = var.quicksight_role_arn != "" ? var.database_names : {}
+
+  principal   = var.quicksight_role_arn
+  permissions = ["SELECT", "DESCRIBE"]
+
+  table {
+    database_name = each.value
+    wildcard      = true
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+  ]
+}
+
+# =============================================================================
+# Admin Data Access — Full SELECT on All Tables
+# =============================================================================
+# LF admins can manage grants but do NOT automatically get data access.
+# This grants the SSO admin role SELECT+DESCRIBE on all tables so they
+# can query curated/analytics layers via Athena.
+# =============================================================================
+
+resource "aws_lakeformation_permissions" "admins_databases" {
+  for_each = var.admins_group_id != "" ? var.database_names : {}
+
+  principal   = "arn:aws:identitystore:::group/${var.admins_group_id}"
+  permissions = ["ALL"]
+
+  database {
+    name = each.value
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
+}
+
+resource "aws_lakeformation_permissions" "admins_tables" {
+  for_each = var.admins_group_id != "" ? var.database_names : {}
+
+  principal   = "arn:aws:identitystore:::group/${var.admins_group_id}"
+  permissions = ["ALL"]
+
+  table {
+    database_name = each.value
+    wildcard      = true
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
+}
+
+resource "aws_lakeformation_permissions" "admins_data_location" {
+  for_each = var.admins_group_id != "" ? {
+    mnpi    = var.mnpi_bucket_arn
+    nonmnpi = var.nonmnpi_bucket_arn
+  } : {}
+
+  principal   = "arn:aws:identitystore:::group/${var.admins_group_id}"
+  permissions = ["DATA_LOCATION_ACCESS"]
+
+  data_location {
+    arn = each.value
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+    aws_lakeformation_resource.mnpi_bucket,
+    aws_lakeformation_resource.nonmnpi_bucket,
+  ]
+}

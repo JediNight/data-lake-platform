@@ -60,6 +60,18 @@ variable "kafka_connect_role_arn" {
   type        = string
 }
 
+variable "quicksight_role_arn" {
+  description = "ARN of the QuickSight service role (for read-only LF grants). Empty string disables."
+  type        = string
+  default     = ""
+}
+
+variable "admins_group_id" {
+  description = "Identity Center group ID for admins (full data access). Empty string disables."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Common resource tags"
   type        = map(string)
