@@ -14,6 +14,13 @@ ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-api/3.4.1/had
 ADD https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-client-runtime/3.4.1/hadoop-client-runtime-3.4.1.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/dev/failsafe/failsafe/3.3.2/failsafe-3.3.2.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 ADD https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
+
+# AWS Glue Schema Registry Avro Converter (shaded uber-jar, ~64MB)
+# Enables Avro schema validation against AWS Glue Schema Registry for
+# Debezium source (CDC events) and Iceberg sink (deserialization).
+# Schemas are auto-registered with BACKWARD compatibility enforcement.
+ADD https://repo1.maven.org/maven2/software/amazon/glue/schema-registry-kafkaconnect-converter/1.1.27/schema-registry-kafkaconnect-converter-1.1.27.jar /opt/kafka/libs/
+
 USER root
 RUN chmod 644 /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-aws-1.8.1.jar \
               /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-aws-bundle-1.8.1.jar \
@@ -21,5 +28,6 @@ RUN chmod 644 /opt/kafka/plugins/iceberg-sink/3f1b5581/iceberg-aws-1.8.1.jar \
               /opt/kafka/plugins/iceberg-sink/3f1b5581/hadoop-client-api-3.4.1.jar \
               /opt/kafka/plugins/iceberg-sink/3f1b5581/hadoop-client-runtime-3.4.1.jar \
               /opt/kafka/plugins/iceberg-sink/3f1b5581/failsafe-3.3.2.jar \
-              /opt/kafka/plugins/iceberg-sink/3f1b5581/postgresql-42.7.4.jar
+              /opt/kafka/plugins/iceberg-sink/3f1b5581/postgresql-42.7.4.jar \
+              /opt/kafka/libs/schema-registry-kafkaconnect-converter-1.1.27.jar
 USER 1001

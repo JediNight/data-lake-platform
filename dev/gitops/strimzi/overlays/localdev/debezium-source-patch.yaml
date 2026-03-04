@@ -8,3 +8,13 @@ spec:
     database.port: "5432"
     database.user: "postgres"
     database.password: "postgres"
+
+    # Avro schema validation via AWS Glue Schema Registry
+    # Every CDC event is serialized as Avro and validated against the
+    # auto-registered schema. Schema changes are enforced with BACKWARD
+    # compatibility (Glue registry default).
+    value.converter: "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    value.converter.region: "us-east-1"
+    value.converter.registry.name: "datalake-schemas-dev"
+    value.converter.schemaAutoRegistrationEnabled: "true"
+    value.converter.avroRecordType: "GENERIC_RECORD"
