@@ -14,16 +14,6 @@ variable "environment" {
   }
 }
 
-variable "allowed_principal_arns" {
-  description = "IAM role ARNs or ArnLike patterns allowed direct S3 access (bypassing Lake Formation deny). Supports wildcards for SSO-generated roles."
-  type        = list(string)
-
-  validation {
-    condition     = length(var.allowed_principal_arns) > 0
-    error_message = "At least one principal ARN must be provided for direct S3 access."
-  }
-}
-
 variable "raw_ia_transition_days" {
   description = "Days before transitioning raw layer to STANDARD_IA (0 = disabled)"
   type        = number
