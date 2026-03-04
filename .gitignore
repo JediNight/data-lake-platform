@@ -4,7 +4,6 @@
 *.tfstate.*
 *.tfvars.bak
 *.tfplan
-.terraform.lock.hcl
 
 # Claude Code worktrees
 .worktrees/
