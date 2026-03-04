@@ -11,7 +11,17 @@ spec:
     iceberg.catalog.warehouse: "s3://datalake-local-iceberg-dev/mnpi"
     iceberg.catalog.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
     iceberg.catalog.s3.region: "us-east-1"
-    iceberg.tables: "default.mnpi_events"
+    # Route each CDC topic to its own Iceberg table
+    iceberg.tables: "default.orders,default.trades,default.positions"
+    iceberg.tables.route-field: "_topic"
+    iceberg.table.default.orders.route-regex: "cdc\\.trading\\.orders"
+    iceberg.table.default.trades.route-regex: "cdc\\.trading\\.trades"
+    iceberg.table.default.positions.route-regex: "cdc\\.trading\\.positions"
+
+    # Inject topic name into records for routing
+    transforms: "insertTopic"
+    transforms.insertTopic.type: "org.apache.kafka.connect.transforms.InsertField$Value"
+    transforms.insertTopic.topic.field: "_topic"
 
     # JSON converter for local dev (Avro + Glue Schema Registry used in prod)
     value.converter: "org.apache.kafka.connect.json.JsonConverter"
