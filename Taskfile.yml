@@ -393,6 +393,102 @@ tasks:
       - terraform -chdir={{.TF_AWS_DIR}} destroy -var-file={{.TF_WORKSPACE | default "dev"}}.tfvars
 
   # =========================================================================
+  # Per-Stack Deployment (State Decomposition)
+  # =========================================================================
+
+  deploy:foundation:
+    desc: Deploy foundation stack (VPC, subnets, security groups)
+    dir: terraform/aws/stacks/foundation
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:data-lake-core:
+    desc: Deploy data-lake-core stack (S3, KMS, Glue catalog)
+    dir: terraform/aws/stacks/data-lake-core
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:security:
+    desc: Deploy security stack (IAM, Lake Formation, observability, bucket policies)
+    dir: terraform/aws/stacks/security
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:compute:
+    desc: Deploy compute stack (MSK, Aurora)
+    dir: terraform/aws/stacks/compute
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:pipelines:
+    desc: Deploy pipelines stack (connectors, Lambda, Glue ETL, analytics)
+    dir: terraform/aws/stacks/pipelines
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:all:
+    desc: Deploy all stacks in dependency order
+    cmds:
+      # Stacks 1, 2, 3 — no interdependencies (but security needs buckets to exist for DENY policies)
+      - task: deploy:foundation
+      - task: deploy:data-lake-core
+      - task: deploy:security
+      # Stack 4 — depends on Stack 1 (VPC/SG IDs)
+      - task: deploy:compute
+      # Stack 5 — depends on Stacks 1 + 4 (VPC IDs + MSK/Aurora endpoints)
+      - task: deploy:pipelines
+
+  # Per-stack destroy tasks (reverse order)
+  destroy:all:
+    desc: Destroy all stacks in reverse dependency order
+    cmds:
+      - task: destroy:pipelines
+      - task: destroy:compute
+      - task: destroy:security
+      - task: destroy:data-lake-core
+      - task: destroy:foundation
+
+  destroy:pipelines:
+    desc: Destroy pipelines stack
+    dir: terraform/aws/stacks/pipelines
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:compute:
+    desc: Destroy compute stack
+    dir: terraform/aws/stacks/compute
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:security:
+    desc: Destroy security stack
+    dir: terraform/aws/stacks/security
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:data-lake-core:
+    desc: Destroy data-lake-core stack
+    dir: terraform/aws/stacks/data-lake-core
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:foundation:
+    desc: Destroy foundation stack
+    dir: terraform/aws/stacks/foundation
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  # =========================================================================
   # Validation
   # =========================================================================
 
