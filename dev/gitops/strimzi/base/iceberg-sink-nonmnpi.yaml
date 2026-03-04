@@ -10,7 +10,7 @@ spec:
   class: org.apache.iceberg.connect.IcebergSinkConnector
   tasksMax: 1
   config:
-    topics: "cdc.trading.accounts,cdc.trading.instruments,stream.market-data"
+    topics: "cdc.trading.accounts,cdc.trading.instruments"
 
     iceberg.catalog.type: "PLACEHOLDER"
     iceberg.catalog.warehouse: "PLACEHOLDER"
