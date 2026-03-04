@@ -78,39 +78,9 @@ module "service_roles" {
 # Lake Formation (LF-tags, ABAC grants, S3 location registration)
 # =============================================================================
 
-# Identity Center group IDs are non-deterministic (AWS-assigned UUIDs).
-# Look them up by display name instead of terraform_remote_state.
-data "aws_ssoadmin_instances" "this" {}
-
-data "aws_identitystore_group" "finance_analysts" {
-  identity_store_id = tolist(data.aws_ssoadmin_instances.this.identity_store_ids)[0]
-  alternate_identifier {
-    unique_attribute {
-      attribute_path  = "DisplayName"
-      attribute_value = "FinanceAnalysts"
-    }
-  }
-}
-
-data "aws_identitystore_group" "data_analysts" {
-  identity_store_id = tolist(data.aws_ssoadmin_instances.this.identity_store_ids)[0]
-  alternate_identifier {
-    unique_attribute {
-      attribute_path  = "DisplayName"
-      attribute_value = "DataAnalysts"
-    }
-  }
-}
-
-data "aws_identitystore_group" "data_engineers" {
-  identity_store_id = tolist(data.aws_ssoadmin_instances.this.identity_store_ids)[0]
-  alternate_identifier {
-    unique_attribute {
-      attribute_path  = "DisplayName"
-      attribute_value = "DataEngineers"
-    }
-  }
-}
+# Identity Center group IDs come from the identity_center module outputs
+# (which creates the groups). Using data sources would fail on fresh deploys
+# because groups don't exist yet during the plan phase.
 
 module "lake_formation" {
   source                    = "../../modules/lake-formation"
@@ -118,11 +88,11 @@ module "lake_formation" {
   database_names            = local.database_names
   mnpi_bucket_arn           = local.mnpi_bucket_arn
   nonmnpi_bucket_arn        = local.nonmnpi_bucket_arn
-  finance_analysts_group_id = data.aws_identitystore_group.finance_analysts.group_id
-  data_analysts_group_id    = data.aws_identitystore_group.data_analysts.group_id
-  data_engineers_group_id   = data.aws_identitystore_group.data_engineers.group_id
+  finance_analysts_group_id = module.identity_center.finance_analysts_group_id
+  data_analysts_group_id    = module.identity_center.data_analysts_group_id
+  data_engineers_group_id   = module.identity_center.data_engineers_group_id
   admin_role_arn            = var.admin_role_arn
-  sso_instance_arn          = tolist(data.aws_ssoadmin_instances.this.arns)[0]
+  sso_instance_arn          = module.identity_center.sso_instance_arn
   glue_etl_role_arn         = module.service_roles.glue_etl_role_arn
   kafka_connect_role_arn    = module.service_roles.kafka_connect_role_arn
 }
