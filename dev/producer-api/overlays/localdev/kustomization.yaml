@@ -5,6 +5,7 @@ resources:
   - ../../base
 patches:
   - path: deployment-patch.yaml
+  - path: cronjob-patch.yaml
 images:
   - name: producer-api
     newName: producer-api

@@ -45,6 +45,17 @@ data "aws_identitystore_group" "admins" {
   }
 }
 
+data "aws_identitystore_group" "reviewers" {
+  identity_store_id = data.aws_ssoadmin_instances.this.identity_store_ids[0]
+
+  alternate_identifier {
+    unique_attribute {
+      attribute_path  = "DisplayName"
+      attribute_value = "Reviewers"
+    }
+  }
+}
+
 # =============================================================================
 # Identity Center (SSO groups + permission sets)
 # =============================================================================
@@ -111,6 +122,7 @@ module "lake_formation" {
   kafka_connect_role_arn    = module.service_roles.kafka_connect_role_arn
   quicksight_role_arn       = local.c.enable_quicksight ? "arn:aws:iam::${local.account_id}:role/service-role/aws-quicksight-service-role-v0" : ""
   admins_group_id           = data.aws_identitystore_group.admins.group_id
+  reviewers_group_id        = data.aws_identitystore_group.reviewers.group_id
 }
 
 # =============================================================================

@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - deployment.yaml
   - service.yaml
+  - cronjob.yaml
 configMapGenerator:
   - name: producer-api-seed-data
     files:

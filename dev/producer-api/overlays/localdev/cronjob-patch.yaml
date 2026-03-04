@@ -1,0 +1,17 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: producer-simulator
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: simulator
+              imagePullPolicy: Never
+              env:
+                - name: PGHOST
+                  value: "sample-postgres.data.svc.cluster.local"
+                - name: PGUSER
+                  value: "postgres"

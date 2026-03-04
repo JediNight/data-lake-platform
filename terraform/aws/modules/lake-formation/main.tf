@@ -561,3 +561,61 @@ resource "aws_lakeformation_permissions" "admins_data_location" {
     aws_lakeformation_resource.nonmnpi_bucket,
   ]
 }
+
+# =============================================================================
+# Reviewers — Same Access as Admins
+# =============================================================================
+
+resource "aws_lakeformation_permissions" "reviewers_databases" {
+  for_each = var.reviewers_group_id != "" ? var.database_names : {}
+
+  principal   = "arn:aws:identitystore:::group/${var.reviewers_group_id}"
+  permissions = ["ALL"]
+
+  database {
+    name = each.value
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
+}
+
+resource "aws_lakeformation_permissions" "reviewers_tables" {
+  for_each = var.reviewers_group_id != "" ? var.database_names : {}
+
+  principal   = "arn:aws:identitystore:::group/${var.reviewers_group_id}"
+  permissions = ["ALL"]
+
+  table {
+    database_name = each.value
+    wildcard      = true
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+  ]
+}
+
+resource "aws_lakeformation_permissions" "reviewers_data_location" {
+  for_each = var.reviewers_group_id != "" ? {
+    mnpi    = var.mnpi_bucket_arn
+    nonmnpi = var.nonmnpi_bucket_arn
+  } : {}
+
+  principal   = "arn:aws:identitystore:::group/${var.reviewers_group_id}"
+  permissions = ["DATA_LOCATION_ACCESS"]
+
+  data_location {
+    arn = each.value
+  }
+
+  depends_on = [
+    aws_lakeformation_data_lake_settings.this,
+    aws_lakeformation_identity_center_configuration.this,
+    aws_lakeformation_resource.mnpi_bucket,
+    aws_lakeformation_resource.nonmnpi_bucket,
+  ]
+}

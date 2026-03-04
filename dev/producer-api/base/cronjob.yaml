@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: producer-simulator
+  labels:
+    app: producer-simulator
+spec:
+  schedule: "*/1 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 55
+      template:
+        metadata:
+          labels:
+            app: producer-simulator
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: simulator
+              image: producer-api:latest
+              command: ["python3", "simulate.py", "--cycles", "5", "--interval", "2"]
+              env:
+                - name: PGHOST
+                  value: "PLACEHOLDER"
+                - name: PGUSER
+                  value: "postgres"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi

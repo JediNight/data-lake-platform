@@ -72,6 +72,12 @@ variable "admins_group_id" {
   default     = ""
 }
 
+variable "reviewers_group_id" {
+  description = "Identity Center group ID for reviewers (full data access). Empty string disables."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Common resource tags"
   type        = map(string)
