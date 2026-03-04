@@ -52,27 +52,36 @@ provider "aws" {
 
 provider "kind" {}
 
+locals {
+  # Extract Kind cluster config into locals so provider blocks don't
+  # directly reference resource attributes (which blocks terraform import).
+  kind_host        = local.c.enable_local_dev ? kind_cluster.this[0].endpoint : ""
+  kind_client_cert = local.c.enable_local_dev ? kind_cluster.this[0].client_certificate : ""
+  kind_client_key  = local.c.enable_local_dev ? kind_cluster.this[0].client_key : ""
+  kind_cluster_ca  = local.c.enable_local_dev ? kind_cluster.this[0].cluster_ca_certificate : ""
+}
+
 provider "helm" {
   kubernetes {
-    host                   = try(kind_cluster.this[0].endpoint, "")
-    client_certificate     = try(kind_cluster.this[0].client_certificate, "")
-    client_key             = try(kind_cluster.this[0].client_key, "")
-    cluster_ca_certificate = try(kind_cluster.this[0].cluster_ca_certificate, "")
+    host                   = local.kind_host
+    client_certificate     = local.kind_client_cert
+    client_key             = local.kind_client_key
+    cluster_ca_certificate = local.kind_cluster_ca
   }
 }
 
 provider "kubernetes" {
-  host                   = try(kind_cluster.this[0].endpoint, "")
-  client_certificate     = try(kind_cluster.this[0].client_certificate, "")
-  client_key             = try(kind_cluster.this[0].client_key, "")
-  cluster_ca_certificate = try(kind_cluster.this[0].cluster_ca_certificate, "")
+  host                   = local.kind_host
+  client_certificate     = local.kind_client_cert
+  client_key             = local.kind_client_key
+  cluster_ca_certificate = local.kind_cluster_ca
 }
 
 provider "kubectl" {
-  host                   = try(kind_cluster.this[0].endpoint, "")
-  client_certificate     = try(kind_cluster.this[0].client_certificate, "")
-  client_key             = try(kind_cluster.this[0].client_key, "")
-  cluster_ca_certificate = try(kind_cluster.this[0].cluster_ca_certificate, "")
+  host                   = local.kind_host
+  client_certificate     = local.kind_client_cert
+  client_key             = local.kind_client_key
+  cluster_ca_certificate = local.kind_cluster_ca
   load_config_file       = false
 }
 
