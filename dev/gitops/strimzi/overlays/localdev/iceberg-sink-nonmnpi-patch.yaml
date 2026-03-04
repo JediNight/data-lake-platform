@@ -13,9 +13,6 @@ spec:
     iceberg.catalog.s3.region: "us-east-1"
     iceberg.tables: "default.nonmnpi_events"
 
-    # Avro schema validation via AWS Glue Schema Registry
-    value.converter: "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
-    value.converter.region: "us-east-1"
-    value.converter.registry.name: "datalake-schemas-dev"
-    value.converter.schemaAutoRegistrationEnabled: "true"
-    value.converter.avroRecordType: "GENERIC_RECORD"
+    # JSON converter for local dev (Avro + Glue Schema Registry used in prod)
+    value.converter: "org.apache.kafka.connect.json.JsonConverter"
+    value.converter.schemas.enable: "true"
