@@ -126,11 +126,15 @@ resource "aws_lakeformation_identity_center_configuration" "this" {
 resource "aws_lakeformation_lf_tag" "sensitivity" {
   key    = "sensitivity"
   values = ["mnpi", "non-mnpi"]
+
+  depends_on = [aws_lakeformation_data_lake_settings.this]
 }
 
 resource "aws_lakeformation_lf_tag" "layer" {
   key    = "layer"
   values = ["raw", "curated", "analytics"]
+
+  depends_on = [aws_lakeformation_data_lake_settings.this]
 }
 
 # =============================================================================
