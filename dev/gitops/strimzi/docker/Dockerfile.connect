@@ -41,8 +41,11 @@ ADD https://repo1.maven.org/maven2/dev/failsafe/failsafe/3.3.2/failsafe-3.3.2.ja
 ADD https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar /opt/kafka/plugins/iceberg-sink/3f1b5581/
 
 # AWS Glue Schema Registry Avro Converter (shaded uber-jar, ~64MB)
+# lombok: runtime dep for Glue Schema Registry (not bundled in the shaded jar)
 ADD https://repo1.maven.org/maven2/software/amazon/glue/schema-registry-kafkaconnect-converter/1.1.27/schema-registry-kafkaconnect-converter-1.1.27.jar /opt/kafka/libs/
+ADD https://repo1.maven.org/maven2/org/projectlombok/lombok/1.18.34/lombok-1.18.34.jar /opt/kafka/libs/
 
 RUN chmod 644 /opt/kafka/plugins/iceberg-sink/3f1b5581/*.jar \
-              /opt/kafka/libs/schema-registry-kafkaconnect-converter-1.1.27.jar
+              /opt/kafka/libs/schema-registry-kafkaconnect-converter-1.1.27.jar \
+              /opt/kafka/libs/lombok-1.18.34.jar
 USER 1001
