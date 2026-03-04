@@ -11,18 +11,21 @@ spec:
     iceberg.catalog.warehouse: "s3://datalake-local-iceberg-dev/nonmnpi"
     iceberg.catalog.io-impl: "org.apache.iceberg.aws.s3.S3FileIO"
     iceberg.catalog.s3.region: "us-east-1"
-    # Route each topic to its own Iceberg table
-    iceberg.tables: "default.accounts,default.instruments,default.market_data"
+    # Route each CDC topic to its own Iceberg table
+    # NOTE: stream.market-data excluded — requires Avro producer (future work)
+    iceberg.tables: "default.accounts,default.instruments"
     iceberg.tables.route-field: "_topic"
     iceberg.table.default.accounts.route-regex: "cdc\\.trading\\.accounts"
     iceberg.table.default.instruments.route-regex: "cdc\\.trading\\.instruments"
-    iceberg.table.default.market_data.route-regex: "stream\\.market-data"
 
     # Inject topic name into records for routing
     transforms: "insertTopic"
     transforms.insertTopic.type: "org.apache.kafka.connect.transforms.InsertField$Value"
     transforms.insertTopic.topic.field: "_topic"
 
-    # JSON converter for local dev (Avro + Glue Schema Registry used in prod)
-    value.converter: "org.apache.kafka.connect.json.JsonConverter"
-    value.converter.schemas.enable: "true"
+    # Avro + Glue Schema Registry (matches prod configuration)
+    value.converter: "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    value.converter.region: "us-east-1"
+    value.converter.schemaAutoRegistrationEnabled: "true"
+    value.converter.avroRecordType: "GENERIC_RECORD"
+    value.converter.registry.name: "datalake-schemas-dev"

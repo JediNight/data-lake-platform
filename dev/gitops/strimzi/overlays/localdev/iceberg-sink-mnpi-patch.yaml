@@ -23,6 +23,9 @@ spec:
     transforms.insertTopic.type: "org.apache.kafka.connect.transforms.InsertField$Value"
     transforms.insertTopic.topic.field: "_topic"
 
-    # JSON converter for local dev (Avro + Glue Schema Registry used in prod)
-    value.converter: "org.apache.kafka.connect.json.JsonConverter"
-    value.converter.schemas.enable: "true"
+    # Avro + Glue Schema Registry (matches prod configuration)
+    value.converter: "com.amazonaws.services.schemaregistry.kafkaconnect.AWSKafkaAvroConverter"
+    value.converter.region: "us-east-1"
+    value.converter.schemaAutoRegistrationEnabled: "true"
+    value.converter.avroRecordType: "GENERIC_RECORD"
+    value.converter.registry.name: "datalake-schemas-dev"
