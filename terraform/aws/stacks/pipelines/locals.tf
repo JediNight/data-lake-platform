@@ -28,7 +28,7 @@ locals {
       enable_aurora              = true
       default_replication_factor = 2
       glue_worker_count          = 5
-      glue_schedule              = "cron(0 */6 * * ? *)"
+      glue_schedule              = "cron(0/15 * * * ? *)"
       athena_scan_limit_bytes    = 1099511627776
       enable_result_reuse        = true
     }

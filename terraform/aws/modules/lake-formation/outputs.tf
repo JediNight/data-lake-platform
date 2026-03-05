@@ -11,12 +11,12 @@
 
 output "lf_tag_sensitivity_key" {
   description = "Key name of the sensitivity LF-Tag"
-  value       = aws_lakeformation_lf_tag.sensitivity.key
+  value       = var.create_account_settings ? aws_lakeformation_lf_tag.sensitivity[0].key : "sensitivity"
 }
 
 output "lf_tag_layer_key" {
   description = "Key name of the layer LF-Tag"
-  value       = aws_lakeformation_lf_tag.layer.key
+  value       = var.create_account_settings ? aws_lakeformation_lf_tag.layer[0].key : "layer"
 }
 
 # =============================================================================

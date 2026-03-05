@@ -1,0 +1,38 @@
+[tools]
+terraform  = "1.9.8"
+kind       = "0.24.0"
+kubectl    = "1.31.0"
+kustomize  = "5.4.3"
+helm       = "3.16.1"
+tilt       = "0.33.21"
+task       = "3.38.0"
+sops       = "3.9.1"
+age        = "1.2.0"
+aws-cli    = "2"
+
+[tasks.setup]
+description = "Install all project tools and configure ksops"
+run = [
+  "mise install",
+  { task = "setup-ksops" },
+]
+
+[tasks.setup-ksops]
+description = "Install ksops kustomize plugin to the correct path"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+VERSION="4.3.3"
+OS=$(uname -s)
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+DEST="$HOME/.config/kustomize/plugin/viaduct.ai/v1/ksops"
+mkdir -p "$DEST"
+if [ -x "$DEST/ksops" ]; then
+  echo "ksops already installed at $DEST/ksops"
+  exit 0
+fi
+curl -sSfL "https://github.com/viaduct-ai/kustomize-sops/releases/download/v${VERSION}/ksops_${VERSION}_${OS}_${ARCH}.tar.gz" \
+  | tar -xzO ksops > "$DEST/ksops"
+chmod +x "$DEST/ksops"
+echo "ksops ${VERSION} installed to $DEST"
+"""

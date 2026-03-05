@@ -4,7 +4,7 @@ Self-service guide for evaluating the Data Lake Platform. Everything here runs w
 
 **Time estimate:** 30-45 minutes for full review, 15 minutes for quick verification.
 
-**Prerequisites:** [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), [Terraform >= 1.7](https://developer.hashicorp.com/terraform/install), [Task](https://taskfile.dev/installation)
+**Prerequisites:** Install all tools at once with [mise](https://mise.jdx.dev): `mise install`. Or manually: [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), [Terraform >= 1.9](https://developer.hashicorp.com/terraform/install), [Task](https://taskfile.dev/installation)
 
 ---
 
@@ -16,17 +16,17 @@ Self-service guide for evaluating the Data Lake Platform. Everything here runs w
 | **Username** | `krakenreviewer` |
 | **Password** | ``2y"tm8=e`Hh9`` |
 
-## Getting Started (3 commands)
+## Getting Started (1 command)
 
 ```bash
-# 1. Check tools are installed
-task reviewer:check
+# All-in-one: configure SSO profile + open browser login + verify access
+./scripts/reviewer-setup.sh
+# Sign in with the credentials above when the browser opens.
 
-# 2. Configure AWS SSO (writes a 'data-lake' profile to ~/.aws/config)
-task reviewer:sso
-
-# 3. Log in (opens browser — sign in with the credentials above)
-task reviewer:login
+# Or step by step:
+# task reviewer:check   # Verify tools installed
+# task reviewer:sso     # Configure AWS profile
+# task reviewer:login   # Open browser for SSO
 
 # 4. Verify everything works
 task reviewer:verify
@@ -131,11 +131,10 @@ unzip data-lake-platform.zip && cd data-lake-platform
 open generated-diagrams/data-lake-platform-full-architecture.png
 
 # 3. Count Terraform resources (~200 in prod)
-cd terraform/aws
-grep -r "^resource " modules/ | wc -l
+grep -r "^resource " terraform/aws/modules/ | wc -l
 
-# 4. Review module structure
-ls modules/
+# 4. Review module + stack structure
+ls terraform/aws/modules/ terraform/aws/stacks/
 ```
 
 The platform is fully deployed in AWS account `445985103066` (us-east-1). All infrastructure is live and producing data.
@@ -201,8 +200,8 @@ EventBridge (1 min) --> Lambda Trading Simulator
 
 | Area | Key Files | What to Look For |
 |------|-----------|-----------------|
-| Root module | `terraform/aws/main.tf` | Module wiring, feature flags via `count` |
-| Environment config | `terraform/aws/locals.tf` | Dev vs prod differences (single source of truth) |
+| Stack orchestration | `terraform/aws/stacks/*/main.tf` | Each stack wires specific modules, separate state files |
+| Environment config | `terraform/aws/stacks/*/locals.tf` | Per-stack workspace-driven dev vs prod config |
 | S3 security | `modules/data-lake-storage/main.tf` | DENY bucket policies (lines ~375-437), KMS CMKs |
 | Lake Formation | `modules/lake-formation/main.tf` | LF-Tags, ABAC grants, IC integration |
 | IAM roles | `modules/service-roles/main.tf` | Least-privilege policies, `/datalake/` path convention |
@@ -259,19 +258,20 @@ task reviewer:verify # Quick status check of all components
 ### 3a. Infrastructure Inventory
 
 ```bash
-# Count deployed resources
-terraform -chdir=terraform/aws workspace select prod
-terraform -chdir=terraform/aws state list | wc -l
-# Expected: ~200 resources
+# Quick status overview (all components)
+task reviewer:verify
 
-# List all modules
-terraform -chdir=terraform/aws state list | grep "^module\." | cut -d. -f1-2 | sort -u
+# Or inspect individual areas:
+task reviewer:kafka-status       # MSK cluster + connector health
+task reviewer:topics             # Kafka topics + partition counts
+task reviewer:cdc-status         # Aurora replication slot, publication, row counts
+task reviewer:s3-freshness       # Latest data files per Iceberg table
 
-# Check MSK cluster status
-aws kafka list-clusters-v2 --query 'ClusterInfoList[].{Name:ClusterName,State:State}' --output table
+# Check MSK cluster status (manual)
+AWS_PROFILE=data-lake aws kafka list-clusters-v2 --query 'ClusterInfoList[].{Name:ClusterName,State:State}' --output table
 
 # Check Aurora cluster status
-aws rds describe-db-clusters --db-cluster-identifier datalake-prod \
+AWS_PROFILE=data-lake aws rds describe-db-clusters --db-cluster-identifier datalake-prod \
   --query 'DBClusters[0].{Status:Status,Engine:Engine,EngineVersion:EngineVersion}' --output table
 ```
 
@@ -425,14 +425,12 @@ Even without AWS credentials, the full architecture is reviewable from the codeb
 ### Terraform Module Quality
 
 ```bash
-# Validate all Terraform
-cd terraform/aws
-terraform init -backend=false > /dev/null 2>&1
-terraform validate
-# Expected: Success! The configuration is valid.
+# Validate all stacks
+task validate:tf
+# Expected: "Success! The configuration is valid." for each of 5 stacks
 
 # Count resources per module
-for mod in modules/*/; do
+for mod in terraform/aws/modules/*/; do
   count=$(grep -c "^resource " "$mod"*.tf 2>/dev/null || echo 0)
   echo "$mod: $count resources"
 done
@@ -478,7 +476,7 @@ done
 | [`README.md`](../README.md) | Project overview, deployment, module index |
 | [`docs/documentation.md`](documentation.md) | Full technical documentation (data model, security, ETL lineage) |
 | [`docs/plans/`](plans/) | Design and implementation plans |
-| [`terraform/aws/locals.tf`](../terraform/aws/locals.tf) | Environment config (dev vs prod) |
+| [`terraform/aws/stacks/*/locals.tf`](../terraform/aws/stacks/) | Per-stack environment config (dev vs prod) |
 | [`scripts/init-aurora-cdc.sh`](../scripts/init-aurora-cdc.sh) | Aurora CDC setup (table schemas, Debezium publication) |
 | [`scripts/upload-connector-plugins.sh`](../scripts/upload-connector-plugins.sh) | MSK Connect plugin packaging |
 | [`scripts/build_lambda.sh`](../scripts/build_lambda.sh) | Lambda deployment artifact build |
@@ -489,18 +487,28 @@ done
 
 ```bash
 # Reviewer onboarding
+./scripts/reviewer-setup.sh      # All-in-one: configure SSO + login + verify
 task reviewer:check              # Verify tools installed (aws, terraform, task)
-task reviewer:sso                # Configure AWS SSO profile (one-time)
-task reviewer:login              # Log in via SSO (opens browser)
+task reviewer:sso                # Configure AWS SSO profile only
+task reviewer:login              # Log in via SSO only (opens browser)
 task reviewer:verify             # Status check: databases, connectors, jobs, Lambda
 task reviewer:e2e                # End-to-end pipeline test: Lambda → Aurora → CDC → S3 (~3 min)
 task reviewer:sample-queries     # Row counts across all 8 tables
 task reviewer:access-control-demo # Instructions for testing ABAC with different roles
 
+# Kafka & CDC debugging
+task reviewer:kafka-status       # MSK cluster, connectors, plugins overview
+task reviewer:topics             # List Kafka topics with partition counts
+task reviewer:cdc-status         # Aurora replication slot, publication, row counts
+task reviewer:connector-logs     # Tail connector logs (FILTER=ERROR for errors only)
+task reviewer:s3-freshness       # Latest data files per Iceberg table
+
 # Data queries
 task athena:query QUERY="SELECT count(*) FROM raw_mnpi_prod.orders" WORKGROUP=data-engineers-prod
 task athena:demo                 # Demo queries across all medallion layers
 
-# Infrastructure (read-only inspection)
+# Infrastructure
+task tf:init-all                 # Initialize all 5 Terraform stacks
+task tf:plan-all                 # Plan all stacks in dependency order
 task validate:tf                 # Validate Terraform configuration
 ```

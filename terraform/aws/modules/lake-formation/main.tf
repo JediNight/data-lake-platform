@@ -88,6 +88,8 @@ data "aws_iam_session_context" "current" {
 # =============================================================================
 
 resource "aws_lakeformation_data_lake_settings" "this" {
+  count = var.create_account_settings ? 1 : 0
+
   admins = [var.admin_role_arn != "" ? var.admin_role_arn : data.aws_iam_session_context.current.issuer_arn]
 
   # Omitting create_database_default_permissions and
@@ -105,6 +107,8 @@ resource "aws_lakeformation_data_lake_settings" "this" {
 # =============================================================================
 
 resource "aws_lakeformation_identity_center_configuration" "this" {
+  count = var.create_account_settings ? 1 : 0
+
   instance_arn = var.sso_instance_arn
 
   # NOTE: The console-configured "AWS account and organization IDs" (ShareRecipients)
@@ -124,6 +128,8 @@ resource "aws_lakeformation_identity_center_configuration" "this" {
 # =============================================================================
 
 resource "aws_lakeformation_lf_tag" "sensitivity" {
+  count = var.create_account_settings ? 1 : 0
+
   key    = "sensitivity"
   values = ["mnpi", "non-mnpi"]
 
@@ -131,6 +137,8 @@ resource "aws_lakeformation_lf_tag" "sensitivity" {
 }
 
 resource "aws_lakeformation_lf_tag" "layer" {
+  count = var.create_account_settings ? 1 : 0
+
   key    = "layer"
   values = ["raw", "curated", "analytics"]
 
@@ -152,15 +160,23 @@ resource "aws_lakeformation_resource_lf_tags" "database" {
     name = var.database_names[each.key]
   }
 
+  # Tag keys are hardcoded strings rather than resource references because the
+  # LF-Tags may be created by the account-baseline stack (when
+  # create_account_settings = false). The values are stable constants.
   lf_tag {
-    key   = aws_lakeformation_lf_tag.sensitivity.key
+    key   = "sensitivity"
     value = each.value.sensitivity
   }
 
   lf_tag {
-    key   = aws_lakeformation_lf_tag.layer.key
+    key   = "layer"
     value = each.value.layer
   }
+
+  depends_on = [
+    aws_lakeformation_lf_tag.sensitivity,
+    aws_lakeformation_lf_tag.layer,
+  ]
 }
 
 # =============================================================================

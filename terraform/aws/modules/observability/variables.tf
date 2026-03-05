@@ -47,9 +47,15 @@ variable "log_retention_days" {
 }
 
 variable "enable_quicksight" {
-  description = "Whether to create QuickSight resources (account subscription + data source)"
+  description = "Whether to create QuickSight resources (role policies + data source)"
   type        = bool
   default     = false
+}
+
+variable "create_quicksight_subscription" {
+  description = "Whether to create the QuickSight account subscription (one per account — set false when managed by account-baseline stack)"
+  type        = bool
+  default     = true
 }
 
 variable "query_results_bucket_arn" {

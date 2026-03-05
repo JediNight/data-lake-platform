@@ -1,14 +1,17 @@
 """
-Analytics: Order Activity Summary per Instrument.
+Analytics: Order Activity Summary per Instrument per Hour.
 
 Source: curated_mnpi_{env}.order_events
 Target: analytics_mnpi_{env}.order_summary (Iceberg, pre-aggregated)
 
-Business metrics:
+Business metrics (per instrument per hour):
   - Total orders, buy/sell split, volume per instrument
   - Average order size
   - Buy/sell ratio (values > 1 = net buying pressure)
   - First and last order timestamps
+
+QuickSight can roll up across hours for all-time view, or slice by
+order_hour for intraday trend analysis and trading heat maps.
 """
 
 import sys
@@ -19,23 +22,12 @@ from awsglue.utils import getResolvedOptions
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-
-
-def assert_quality(df, table_name, checks):
-    """Lightweight data quality gate — fails the job if any check fails."""
-    for check_name, condition in checks.items():
-        if not condition:
-            raise ValueError(f"DQ FAILED [{table_name}]: {check_name}")
-    print(f"DQ PASSED [{table_name}]: {list(checks.keys())}")
-
+from incremental import assert_quality
 
 args = getResolvedOptions(sys.argv, ["JOB_NAME", "environment", "iceberg-warehouse"])
 env = args["environment"]
 warehouse = args["iceberg_warehouse"]
 
-# Register the Iceberg catalog backed by AWS Glue Data Catalog.
-# --datalake-formats=iceberg only adds the JARs; the named catalog
-# must be registered explicitly so spark.table("glue_catalog.db.table") works.
 spark = (
     SparkSession.builder.config(
         "spark.sql.catalog.glue_catalog",
@@ -64,8 +56,8 @@ job.init(args["JOB_NAME"], args)
 source_table = f"glue_catalog.curated_mnpi_{env}.order_events"
 df = spark.table(source_table)
 
-# --- Aggregate per instrument ---
-df_summary = df.groupBy("instrument_id").agg(
+# --- Aggregate per instrument per hour ---
+df_summary = df.groupBy("instrument_id", "order_hour").agg(
     F.count("*").alias("total_orders"),
     F.count(F.when(F.col("is_buy"), 1)).alias("buy_orders"),
     F.count(F.when(~F.col("is_buy"), 1)).alias("sell_orders"),
@@ -88,12 +80,16 @@ target_table = f"glue_catalog.analytics_mnpi_{env}.order_summary"
 
 row_count = df_summary.count()
 
-assert_quality(df_summary, target_table, {
-    "row_count > 0": row_count > 0,
-    f"row_count={row_count}": True,
-})
+assert_quality(
+    df_summary,
+    target_table,
+    {
+        "row_count > 0": row_count > 0,
+        f"row_count={row_count}": True,
+    },
+)
 
-# --- Write to analytics Iceberg table (overwrite for full refresh) ---
+# --- Write to analytics Iceberg table (full recompute from curated) ---
 df_summary.writeTo(target_table).using("iceberg").createOrReplace()
 
 job.commit()

@@ -6,13 +6,8 @@
  */
 
 variable "environment" {
-  description = "Environment name (dev, prod)"
+  description = "Environment or deployment context (dev, prod, shared)"
   type        = string
-
-  validation {
-    condition     = contains(["dev", "prod"], var.environment)
-    error_message = "Environment must be 'dev' or 'prod'."
-  }
 }
 
 variable "mnpi_bucket_arn" {

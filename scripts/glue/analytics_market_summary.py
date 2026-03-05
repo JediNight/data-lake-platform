@@ -1,15 +1,17 @@
 """
-Analytics: Market Data Summary per Ticker.
+Analytics: Market Data Summary per Ticker per Hour (OHLC).
 
 Source: curated_nonmnpi_{env}.market_ticks
 Target: analytics_nonmnpi_{env}.market_summary (Iceberg, pre-aggregated)
 
-Business metrics:
-  - Price range (low, high, average)
-  - Average spread and mid-price
-  - Total volume and tick count
+Business metrics (per ticker per hour):
+  - OHLC: open_price, high_price, low_price, close_price
+  - Average price, spread, mid-price
   - Spread as percentage of mid-price (liquidity indicator)
+  - Total volume and tick count
   - First and last tick timestamps
+
+QuickSight can render candlestick charts directly from this output.
 """
 
 import sys
@@ -19,24 +21,14 @@ from awsglue.job import Job
 from awsglue.utils import getResolvedOptions
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 
-
-
-def assert_quality(df, table_name, checks):
-    """Lightweight data quality gate — fails the job if any check fails."""
-    for check_name, condition in checks.items():
-        if not condition:
-            raise ValueError(f"DQ FAILED [{table_name}]: {check_name}")
-    print(f"DQ PASSED [{table_name}]: {list(checks.keys())}")
-
+from incremental import assert_quality
 
 args = getResolvedOptions(sys.argv, ["JOB_NAME", "environment", "iceberg-warehouse"])
 env = args["environment"]
 warehouse = args["iceberg_warehouse"]
 
-# Register the Iceberg catalog backed by AWS Glue Data Catalog.
-# --datalake-formats=iceberg only adds the JARs; the named catalog
-# must be registered explicitly so spark.table("glue_catalog.db.table") works.
 spark = (
     SparkSession.builder.config(
         "spark.sql.catalog.glue_catalog",
@@ -65,11 +57,37 @@ job.init(args["JOB_NAME"], args)
 source_table = f"glue_catalog.curated_nonmnpi_{env}.market_ticks"
 df = spark.table(source_table)
 
-# --- Aggregate per ticker ---
+# --- Compute open/close price per ticker per hour via window functions ---
+hour_window = Window.partitionBy("ticker", "tick_hour").orderBy("tick_timestamp")
+df_with_rank = (
+    df.withColumn("asc_rn", F.row_number().over(hour_window))
+    .withColumn(
+        "desc_rn",
+        F.row_number().over(
+            Window.partitionBy("ticker", "tick_hour").orderBy(
+                F.col("tick_timestamp").desc()
+            )
+        ),
+    )
+)
+
+# Extract first and last prices per group
+open_close = df_with_rank.groupBy("ticker", "tick_hour").agg(
+    F.round(
+        F.first(F.when(F.col("asc_rn") == 1, F.col("last_price")), ignorenulls=True),
+        2,
+    ).alias("open_price"),
+    F.round(
+        F.first(F.when(F.col("desc_rn") == 1, F.col("last_price")), ignorenulls=True),
+        2,
+    ).alias("close_price"),
+)
+
+# --- Aggregate per ticker per hour ---
 avg_spread = F.avg("spread")
 avg_mid = F.avg("mid_price")
 
-df_summary = df.groupBy("ticker").agg(
+df_summary = df.groupBy("ticker", "tick_hour").agg(
     F.count("*").alias("tick_count"),
     F.sum("volume").alias("total_volume"),
     F.round(F.min("last_price"), 2).alias("low_price"),
@@ -85,17 +103,24 @@ df_summary = df.groupBy("ticker").agg(
     F.max("tick_timestamp").alias("last_tick_at"),
 )
 
+# Join open/close prices
+df_summary = df_summary.join(open_close, on=["ticker", "tick_hour"], how="inner")
+
 # --- Data quality checks ---
 target_table = f"glue_catalog.analytics_nonmnpi_{env}.market_summary"
 
 row_count = df_summary.count()
 
-assert_quality(df_summary, target_table, {
-    "row_count > 0": row_count > 0,
-    f"row_count={row_count}": True,
-})
+assert_quality(
+    df_summary,
+    target_table,
+    {
+        "row_count > 0": row_count > 0,
+        f"row_count={row_count}": True,
+    },
+)
 
-# --- Write to analytics Iceberg table (overwrite for full refresh) ---
+# --- Write to analytics Iceberg table (full recompute from curated) ---
 df_summary.writeTo(target_table).using("iceberg").createOrReplace()
 
 job.commit()

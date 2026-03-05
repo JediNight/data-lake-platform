@@ -353,7 +353,7 @@ data "aws_kms_key" "quicksight" {
 }
 
 resource "aws_quicksight_account_subscription" "this" {
-  count = var.enable_quicksight ? 1 : 0
+  count = var.enable_quicksight && var.create_quicksight_subscription ? 1 : 0
 
   account_name          = "datalake-${var.account_id}"
   edition               = "STANDARD"
@@ -376,13 +376,15 @@ data "aws_iam_role" "quicksight_service" {
   count = var.enable_quicksight ? 1 : 0
   name  = "aws-quicksight-service-role-v0"
 
+  # Depend on subscription only when we create it; otherwise the role
+  # already exists from the account-baseline stack.
   depends_on = [aws_quicksight_account_subscription.this]
 }
 
 resource "aws_iam_role_policy" "quicksight_s3_and_glue" {
   count = var.enable_quicksight ? 1 : 0
 
-  name = "datalake-s3-glue-access"
+  name = "datalake-s3-glue-access-${var.environment}"
   role = data.aws_iam_role.quicksight_service[0].name
 
   policy = jsonencode({
@@ -438,7 +440,7 @@ resource "aws_iam_role_policy" "quicksight_s3_and_glue" {
 resource "aws_iam_role_policy" "quicksight_kms" {
   count = var.enable_quicksight ? 1 : 0
 
-  name = "datalake-kms-access"
+  name = "datalake-kms-access-${var.environment}"
   role = data.aws_iam_role.quicksight_service[0].name
 
   policy = jsonencode({

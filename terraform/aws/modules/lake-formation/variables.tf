@@ -78,6 +78,12 @@ variable "reviewers_group_id" {
   default     = ""
 }
 
+variable "create_account_settings" {
+  description = "Whether to create account-global singletons (LF settings, IdC config, LF-Tags). Set false when these are managed by the account-baseline stack."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Common resource tags"
   type        = map(string)

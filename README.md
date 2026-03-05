@@ -1,183 +1,190 @@
 # Data Lake Platform
 
-Secure, auditable AWS data lake with MNPI/non-MNPI isolation for an asset management firm.
+A secure, real-time data lake built for an asset management firm that handles both public and sensitive (MNPI) trading data. The platform captures every database change via CDC, streams market data through Kafka, and lands everything as Apache Iceberg tables on S3 — queryable within minutes through Athena and QuickSight.
 
-Real-time CDC and streaming ingestion into Apache Iceberg tables on S3, with Lake Formation attribute-based access control (ABAC) and a medallion architecture powered by Glue ETL.
+The entire infrastructure is defined in Terraform (~200 AWS resources across 6 stacks) and runs in two modes: a fully managed **production** deployment on AWS, and a **local dev** environment on Kind that mirrors the same pipeline for fast iteration.
 
-![Architecture Diagram](generated-diagrams/data-lake-platform-full-architecture.png)
+---
 
-## Key Capabilities
-
-| Capability | Implementation |
-|---|---|
-| **CDC Pipeline** | Aurora PostgreSQL &rarr; Debezium (MSK Connect) &rarr; MSK &rarr; Iceberg Sink &rarr; S3 |
-| **Streaming Ingestion** | Lambda trading simulator &rarr; MSK &rarr; Iceberg Sink &rarr; S3 |
-| **MNPI Isolation** | Separate S3 buckets, KMS CMKs, Kafka topics, Glue databases per sensitivity zone |
-| **Lake Formation ABAC** | LF-Tags (`sensitivity` + `layer`) with grants per IAM Identity Center group |
-| **Medallion Transforms** | Glue PySpark jobs: Raw &rarr; Curated (dedup + type cast) &rarr; Analytics (aggregates) |
-| **Iceberg Tables** | Schema evolution, snapshot history, time-travel, Parquet data files |
-| **BI / Reporting** | 3 Athena workgroups + QuickSight data source (via Athena connector) |
-| **Infrastructure as Code** | 14 Terraform modules, workspace-driven dev/prod, ~200 resources |
-
-## Architecture
-
-### Data Flow
-
-```
-EventBridge (1 min) ──► Lambda Trading Simulator
-                             │
-                             ├──► Aurora PostgreSQL (RDS Data API)
-                             │       └──► Debezium CDC (WAL) ──► MSK
-                             │                                    │
-                             └──► MSK (direct produce: market data)
-                                                              │
-                                  MSK Connect Iceberg Sinks ◄─┘
-                                       │
-                             ┌─────────┼──────────┐
-                             ▼                     ▼
-                           S3 MNPI Bucket     S3 Non-MNPI Bucket
-                           (Iceberg tables)   (Iceberg tables)
-                             │                     │
-                             └─────────┬───────────┘
-                                       ▼
-                              Glue ETL (4 PySpark jobs)
-                              raw → curated → analytics
-                                       │
-                                       ▼
-                              Athena (3 workgroups)
-                                       │
-                                       ▼
-                              QuickSight dashboards
-```
-
-### Access Control Model (ABAC via Lake Formation)
-
-| Persona | Sensitivity | Layers | Permission |
-|---|---|---|---|
-| **Finance Analyst** | mnpi + non-mnpi | curated, analytics | SELECT |
-| **Data Analyst** | non-mnpi only | curated, analytics | SELECT |
-| **Data Engineer** | mnpi + non-mnpi | raw, curated, analytics | ALL + DATA_LOCATION_ACCESS |
-
-Data Analysts querying MNPI tables receive `AccessDeniedException` from Lake Formation. Grants use LF-Tag expressions (AND across tag keys, OR within values) so new tables automatically inherit permissions.
-
-### Medallion Layers
-
-| Layer | MNPI Database | Non-MNPI Database | Description |
-|---|---|---|---|
-| **Raw** | `raw_mnpi_{env}` | `raw_nonmnpi_{env}` | Append-only CDC/streaming events |
-| **Curated** | `curated_mnpi_{env}` | `curated_nonmnpi_{env}` | Deduplicated, typed, enriched |
-| **Analytics** | `analytics_mnpi_{env}` | `analytics_nonmnpi_{env}` | Pre-aggregated summaries |
-
-## Project Structure
-
-```
-terraform/aws/                AWS infrastructure (14 modules, workspace-driven dev/prod)
-  modules/
-    networking/               VPC, subnets, NAT GW, S3 + STS endpoints, security groups
-    data-lake-storage/        S3 buckets (MNPI + non-MNPI + audit + query-results), KMS CMKs
-    streaming/                MSK Provisioned cluster
-    glue-catalog/             6 Glue databases across medallion layers
-    glue-etl/                 4 PySpark jobs, workflow with conditional triggers
-    identity-center/          3 IAM IC groups + permission sets + demo users
-    lake-formation/           LF-Tags, tag-based ABAC grants, S3 registrations, IC integration
-    service-roles/            IAM roles (Kafka Connect, Glue ETL, Lambda) with least-privilege
-    analytics/                3 Athena workgroups + named queries
-    observability/            CloudTrail, QuickSight data source, CloudWatch log groups
-    aurora-postgres/          Aurora PostgreSQL 15 (CDC source, prod only)
-    msk-connect/              Debezium source + 2 Iceberg sinks via MSK Connect (prod only)
-    lambda-producer/          Lambda trading simulator + EventBridge schedule (prod only)
-    local-dev-storage/        S3 bucket for local Iceberg data (dev only)
-scripts/
-  lambda/trading_simulator/   Lambda source: simulator, Kafka producer, RDS Data API client
-  glue/                       4 PySpark ETL scripts (uploaded to S3 by Terraform)
-  01_curated/                 Athena SQL proving curated transforms
-  02_analytics/               Athena SQL proving analytics transforms
-  validation/                 Access control + Iceberg time-travel validation queries
-  init-aurora-cdc.sh          Aurora CDC setup (replication slot, publication, seed tables)
-  upload-connector-plugins.sh Download + repackage Debezium & Iceberg connector JARs
-  build_lambda.sh             Build Lambda deployment artifacts (.build/ directory)
-docs/
-  documentation.md            Full platform documentation (security, data model, ETL, etc.)
-  plans/                      Design and implementation documents
-```
-
-> **Local development code** (Kind, ArgoCD, Strimzi, FastAPI producer-api, Tiltfile) lives on the [`dev`](../../tree/dev) branch. The local environment validates the same CDC + Iceberg pipeline using Strimzi Kafka Connect in a Kind cluster before deploying to AWS.
-
-## Deployment
+## Getting Started
 
 ### Prerequisites
 
-- Terraform >= 1.7.0
-- AWS CLI v2 with SSO configured (`aws sso login --profile data-lake`)
+```bash
+# Install all tools at once (terraform, aws-cli, kind, kubectl, helm, etc.)
+mise install
+
+# Or manually: Terraform >= 1.9, AWS CLI v2, Task (https://taskfile.dev)
+```
+
+### Authenticate
+
+```bash
+# One command — configures SSO, opens browser login, verifies access
+./scripts/reviewer-setup.sh
+```
+
+---
+
+## Local Dev Environment
+
+The local stack mirrors production's pipeline on your laptop using Kind (Kubernetes) + Strimzi (Kafka) + ArgoCD. Same CDC flow, same Iceberg tables — just running locally.
+
+![Dev Architecture](generated-diagrams/data-lake-dev-architecture.png)
+
+**How it works:** ArgoCD watches the local git repo (mounted at `/mnt/data-lake-platform`) and auto-syncs Kubernetes manifests. Two CronJobs run every minute, generating trading data into PostgreSQL. Debezium captures the changes via CDC and Iceberg sinks write Parquet files to S3. Commit to git, ArgoCD picks it up — same GitOps workflow as a real cluster.
+
+### Spin It Up
+
+```bash
+# Creates Kind cluster, installs ArgoCD + Strimzi, builds images, deploys everything
+task dev:up
+
+# Tear it all down
+task dev:down
+```
+
+### Dev Workflow
+
+```bash
+# Start Tilt for hot-reload inner dev loop
+task dev:tilt
+
+# Check cluster status
+task dev:status
+```
+
+---
+
+## Production Deployment
+
+Production runs entirely on AWS managed services. No Kubernetes, no containers to manage — just Lambda, MSK, Aurora, and Glue.
+
+![Production Architecture](generated-diagrams/data-lake-platform-full-architecture.png)
+
+**Two data paths, one destination:**
+- **CDC path** — Lambda inserts orders, trades, and positions into Aurora. Debezium captures every WAL change, publishes to MSK, and Iceberg sinks write Parquet files to the MNPI bucket.
+- **Direct produce** — Lambda publishes market data, accounts, and instruments straight to MSK. A second Iceberg sink writes these to the non-MNPI bucket.
+
+Both paths land in Iceberg tables, flow through Glue ETL's medallion layers (raw → curated → analytics), and become queryable in Athena.
 
 ### Deploy
 
 ```bash
-# Authenticate
-aws sso login --profile data-lake
+# Initialize all Terraform stacks
+task tf:init-all
 
-# Initialize and select workspace
-task aws:init TF_WORKSPACE=prod
+# Review what will be created (~200 resources across 5 stacks)
+task tf:plan-all
 
-# Review the plan (~200 resources)
-task aws:plan TF_WORKSPACE=prod
-
-# Apply
-task aws:apply TF_WORKSPACE=prod
+# Deploy everything (tiers run in parallel where possible)
+task deploy:all WORKSPACE=prod
 ```
 
-### Post-Deploy Steps
+### Post-Deploy (one-time setup)
 
 ```bash
-# 1. Build and deploy Lambda trading simulator
-./scripts/build_lambda.sh
-terraform -chdir=terraform/aws apply -var-file=prod.tfvars
-
-# 2. Upload MSK Connect plugin JARs (one-time)
+# Upload MSK Connect connector JARs to S3
 ./scripts/upload-connector-plugins.sh prod
 
-# 3. Initialize Aurora CDC (replication slot + publication + seed 5 tables)
+# Initialize Aurora CDC (replication slot + publication + seed tables)
 ./scripts/init-aurora-cdc.sh prod
 
-# 4. Enable connectors (set enable_debezium_connector = true, re-apply)
-task aws:apply TF_WORKSPACE=prod
-
-# 5. Run Glue medallion workflow
+# Kick off the Glue medallion workflow
 AWS_PROFILE=data-lake aws glue start-workflow-run --name datalake-medallion-prod
 
-# 6. Verify data flow end-to-end
-task athena:query QUERY="SELECT count(*) FROM raw_mnpi_prod.orders" WORKGROUP=data-engineers-prod
+# Verify the full pipeline end-to-end (~3 min)
+task reviewer:e2e
 ```
 
-### Terraform Modules
+### Terraform Stacks
 
-| Module | Resources | Key Outputs |
+Infrastructure is split into 6 stacks that deploy in dependency order:
+
+```
+Tier 0 (one-time):    account-baseline
+                       Identity Center groups, LF settings, QuickSight
+
+Tier 1 (parallel):    foundation              data-lake-core
+                       VPC, subnets, NAT GW     S3 buckets, KMS, Glue DBs
+
+Tier 2 (parallel):    security                compute
+                       Lake Formation ABAC      MSK cluster, Aurora PG
+
+Tier 3 (sequential):  pipelines
+                       MSK Connect, Lambda, Glue ETL, Athena
+```
+
+Each stack has its own state file in S3. Stacks are workspace-driven — `dev` and `prod` workspaces control instance sizes, feature flags, and what gets created.
+
+---
+
+## Debugging & Validation
+
+These tasks work against the production MSK cluster:
+
+```bash
+# Pipeline health
+task reviewer:kafka-status          # MSK cluster + connector health
+task reviewer:topics                # Kafka topics + partition counts
+task reviewer:cdc-status            # Aurora replication slot, publication, row counts
+task reviewer:connector-logs        # Tail connector logs (FILTER=ERROR for errors only)
+task reviewer:s3-freshness          # Latest Iceberg data files per table
+
+# Query the data
+task athena:demo                    # Query all medallion layers via Athena
+task reviewer:sample-queries        # Row counts across all 8 tables
+
+# Full end-to-end verification (~3 min)
+task reviewer:e2e
+```
+
+---
+
+## Security Model
+
+MNPI and non-MNPI data are isolated at every layer:
+
+- **Separate S3 buckets** with separate KMS customer-managed keys
+- **Separate Kafka topics** and Iceberg sink connectors
+- **Separate Glue databases** per medallion layer per sensitivity zone
+- **Lake Formation ABAC** — tag-based grants (`sensitivity`, `layer`) control who sees what
+
+| Persona | Can Access | Layers |
 |---|---|---|
-| networking | VPC, 2 private + 1 public subnet, NAT GW, S3/STS endpoints, SGs | `vpc_id`, `private_subnet_ids` |
-| data-lake-storage | 4 S3 buckets, 2 KMS CMKs, DENY bucket policies | `mnpi_bucket_id`, KMS ARNs |
-| streaming | MSK cluster (IAM auth, TLS in-transit) | `bootstrap_brokers` |
-| glue-catalog | 6 databases, schema registry | `database_names` |
-| glue-etl | 4 PySpark jobs, workflow, conditional triggers | `workflow_name`, `job_names` |
-| identity-center | 3 groups, 3 permission sets, 3 demo users | `*_group_id` |
-| lake-formation | 2 LF-Tags, 14 grants, 2 S3 registrations, IC config | LF admin configured |
-| service-roles | Kafka Connect + Glue ETL + Lambda IAM roles | `*_role_arn` |
-| analytics | 3 Athena workgroups | `workgroup_names` |
-| observability | CloudTrail, QuickSight, CloudWatch | `cloudtrail_arn` |
-| aurora-postgres | Aurora PG 15, Secrets Manager | `cluster_endpoint` |
-| msk-connect | Debezium source + 2 Iceberg sinks (for_each) | `connector_arns` |
-| lambda-producer | Lambda + EventBridge schedule (1 min) | `function_name` |
+| Finance Analyst | MNPI + Non-MNPI | Curated, Analytics |
+| Data Analyst | Non-MNPI only | Curated, Analytics |
+| Data Engineer | Everything | Raw, Curated, Analytics |
 
-### Security Highlights
+Athena queries against unauthorized tables return `AccessDeniedException` — no silent empty results.
 
-- **S3 DENY bucket policies** block all `s3:GetObject`/`s3:PutObject` except Lake Formation SLR and explicitly allowed IAM roles
-- **KMS CMK per sensitivity zone** — MNPI and non-MNPI data encrypted with separate keys
-- **MSK IAM auth + TLS** — no plaintext Kafka traffic, IAM-based ACLs
-- **Lake Formation overrides IAM** — removing default `IAMAllowedPrincipals` forces all access through LF grants
-- **Secrets Manager** for Aurora credentials (not in Terraform state)
-- **CloudTrail** audit logging to dedicated S3 bucket with 5-year retention (SEC Rule 204-2)
+---
 
-## Documentation
+## Project Layout
 
-- [`docs/REVIEWER_GUIDE.md`](docs/REVIEWER_GUIDE.md) — **Start here** — self-service reviewer onboarding with verification commands
-- [`docs/documentation.md`](docs/documentation.md) — Full platform documentation (data model, security, ETL lineage, deployment)
-- [`docs/plans/`](docs/plans/) — Design and implementation plans
+```
+terraform/aws/
+  stacks/              6 deployment stacks (account-baseline, foundation,
+                       data-lake-core, security, compute, pipelines)
+  modules/             14 shared Terraform modules
+
+scripts/
+  glue/                PySpark ETL scripts (medallion transforms)
+  lambda/              Trading simulator Lambda source
+  verify-e2e-pipeline.sh, init-aurora-cdc.sh, upload-connector-plugins.sh
+
+dev/
+  gitops/              ArgoCD ApplicationSets (Strimzi, producer-api, PostgreSQL)
+  producer-api/        Kustomize base + overlays for the FastAPI producer
+
+Taskfile.yml           All orchestration (deploy, destroy, debug, dev)
+mise.toml              Tool versions (terraform, kubectl, helm, etc.)
+```
+
+---
+
+## Further Reading
+
+- **[`docs/REVIEWER_GUIDE.md`](docs/REVIEWER_GUIDE.md)** — Self-service reviewer onboarding with step-by-step verification
+- **[`docs/documentation.md`](docs/documentation.md)** — Full platform docs (data model, security controls, ETL lineage)
+- **[`docs/plans/`](docs/plans/)** — Design documents and implementation plans

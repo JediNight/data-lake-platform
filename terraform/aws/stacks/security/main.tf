@@ -1,9 +1,14 @@
 /**
  * Stack 3: Security — IAM, Lake Formation, observability, bucket policies
  *
- * Upstream deps: none (all references use deterministic ARN construction)
- * Contains: identity_center, service_roles, lake_formation, observability,
- *           plus S3 bucket DENY policies (extracted from data-lake-storage)
+ * Upstream deps: account-baseline (Identity Center groups, LF settings, LF-Tags)
+ *                — referenced via AWS data sources, not terraform_remote_state
+ * Contains: service_roles, lake_formation (grants/registrations only),
+ *           observability, plus S3 bucket DENY policies
+ *
+ * Account-global singletons (Identity Center groups, LF data lake settings,
+ * LF-Tags, QuickSight subscription) live in the account-baseline stack.
+ * This stack only creates environment-scoped resources.
  */
 
 terraform {
@@ -57,15 +62,43 @@ data "aws_identitystore_group" "reviewers" {
 }
 
 # =============================================================================
-# Identity Center (SSO groups + permission sets)
+# Identity Center Group Lookups
+# =============================================================================
+# Groups are created by the account-baseline stack. This stack looks them up
+# via data sources to pass their IDs to Lake Formation for ABAC grants.
 # =============================================================================
 
-module "identity_center" {
-  source                   = "../../modules/identity-center"
-  environment              = local.env
-  mnpi_bucket_arn          = local.mnpi_bucket_arn
-  nonmnpi_bucket_arn       = local.nonmnpi_bucket_arn
-  query_results_bucket_arn = local.query_results_bucket_arn
+data "aws_identitystore_group" "finance_analysts" {
+  identity_store_id = data.aws_ssoadmin_instances.this.identity_store_ids[0]
+
+  alternate_identifier {
+    unique_attribute {
+      attribute_path  = "DisplayName"
+      attribute_value = "FinanceAnalysts"
+    }
+  }
+}
+
+data "aws_identitystore_group" "data_analysts" {
+  identity_store_id = data.aws_ssoadmin_instances.this.identity_store_ids[0]
+
+  alternate_identifier {
+    unique_attribute {
+      attribute_path  = "DisplayName"
+      attribute_value = "DataAnalysts"
+    }
+  }
+}
+
+data "aws_identitystore_group" "data_engineers" {
+  identity_store_id = data.aws_ssoadmin_instances.this.identity_store_ids[0]
+
+  alternate_identifier {
+    unique_attribute {
+      attribute_path  = "DisplayName"
+      attribute_value = "DataEngineers"
+    }
+  }
 }
 
 # =============================================================================
@@ -100,24 +133,25 @@ module "service_roles" {
 }
 
 # =============================================================================
-# Lake Formation (LF-tags, ABAC grants, S3 location registration)
+# Lake Formation (ABAC grants, S3 location registration, tag assignments)
 # =============================================================================
-
-# Identity Center group IDs come from the identity_center module outputs
-# (which creates the groups). Using data sources would fail on fresh deploys
-# because groups don't exist yet during the plan phase.
+# Account-global singletons (data_lake_settings, identity_center_configuration,
+# LF-Tags) are managed by the account-baseline stack. This module only creates
+# environment-scoped resources: tag assignments, S3 registrations, and grants.
+# =============================================================================
 
 module "lake_formation" {
   source                    = "../../modules/lake-formation"
   environment               = local.env
+  create_account_settings   = false
   database_names            = local.database_names
   mnpi_bucket_arn           = local.mnpi_bucket_arn
   nonmnpi_bucket_arn        = local.nonmnpi_bucket_arn
-  finance_analysts_group_id = module.identity_center.finance_analysts_group_id
-  data_analysts_group_id    = module.identity_center.data_analysts_group_id
-  data_engineers_group_id   = module.identity_center.data_engineers_group_id
+  finance_analysts_group_id = data.aws_identitystore_group.finance_analysts.group_id
+  data_analysts_group_id    = data.aws_identitystore_group.data_analysts.group_id
+  data_engineers_group_id   = data.aws_identitystore_group.data_engineers.group_id
   admin_role_arn            = var.admin_role_arn
-  sso_instance_arn          = module.identity_center.sso_instance_arn
+  sso_instance_arn          = tolist(data.aws_ssoadmin_instances.this.arns)[0]
   glue_etl_role_arn         = module.service_roles.glue_etl_role_arn
   kafka_connect_role_arn    = module.service_roles.kafka_connect_role_arn
   quicksight_role_arn       = local.c.enable_quicksight ? "arn:aws:iam::${local.account_id}:role/service-role/aws-quicksight-service-role-v0" : ""
@@ -130,18 +164,19 @@ module "lake_formation" {
 # =============================================================================
 
 module "observability" {
-  source                   = "../../modules/observability"
-  environment              = local.env
-  account_id               = local.account_id
-  mnpi_bucket_arn          = local.mnpi_bucket_arn
-  nonmnpi_bucket_arn       = local.nonmnpi_bucket_arn
-  audit_bucket_arn         = local.audit_bucket_arn
-  audit_bucket_id          = local.audit_bucket_id
-  log_retention_days       = local.c.audit_retention_days
-  enable_quicksight        = local.c.enable_quicksight
-  query_results_bucket_arn = local.query_results_bucket_arn
-  athena_workgroup_name    = "data-engineers-${local.env}"
-  quicksight_kms_key_arn   = local.nonmnpi_kms_alias_arn
+  source                         = "../../modules/observability"
+  environment                    = local.env
+  account_id                     = local.account_id
+  mnpi_bucket_arn                = local.mnpi_bucket_arn
+  nonmnpi_bucket_arn             = local.nonmnpi_bucket_arn
+  audit_bucket_arn               = local.audit_bucket_arn
+  audit_bucket_id                = local.audit_bucket_id
+  log_retention_days             = local.c.audit_retention_days
+  enable_quicksight              = local.c.enable_quicksight
+  create_quicksight_subscription = false # managed by account-baseline stack
+  query_results_bucket_arn       = local.query_results_bucket_arn
+  athena_workgroup_name          = "data-engineers-${local.env}"
+  quicksight_kms_key_arn         = local.nonmnpi_kms_alias_arn
 }
 
 # =============================================================================

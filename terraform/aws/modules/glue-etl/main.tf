@@ -79,6 +79,16 @@ resource "aws_s3_object" "scripts" {
   tags = local.common_tags
 }
 
+# Shared helper library — referenced by all jobs via --extra-py-files
+resource "aws_s3_object" "incremental_lib" {
+  bucket      = var.scripts_bucket_id
+  key         = "glue-scripts/lib/incremental.py"
+  source      = "${path.module}/../../../../scripts/glue/lib/incremental.py"
+  source_hash = filemd5("${path.module}/../../../../scripts/glue/lib/incremental.py")
+
+  tags = local.common_tags
+}
+
 # =============================================================================
 # Glue Jobs (for_each over 4 jobs)
 # =============================================================================
@@ -107,6 +117,8 @@ resource "aws_glue_job" "this" {
     "--job-language"                     = "python"
     "--TempDir"                          = "s3://${var.scripts_bucket_id}/glue-temp/"
     "--iceberg-warehouse"                = "s3://${local.zone_buckets[each.value.zone]}/"
+    "--extra-py-files"                   = "s3://${var.scripts_bucket_id}/glue-scripts/lib/incremental.py"
+    "--full-refresh"                     = "false"
   }
 
   tags = merge(local.common_tags, {
@@ -115,7 +127,7 @@ resource "aws_glue_job" "this" {
     DataZone = each.value.zone
   })
 
-  depends_on = [aws_s3_object.scripts]
+  depends_on = [aws_s3_object.scripts, aws_s3_object.incremental_lib]
 }
 
 # =============================================================================
