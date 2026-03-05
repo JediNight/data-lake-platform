@@ -60,9 +60,10 @@ locals {
 resource "aws_athena_workgroup" "this" {
   for_each = local.workgroups
 
-  name        = "${each.key}-${var.environment}"
-  description = "${each.value.description} (${var.environment})"
-  state       = "ENABLED"
+  name          = "${each.key}-${var.environment}"
+  description   = "${each.value.description} (${var.environment})"
+  state         = "ENABLED"
+  force_destroy = true
 
   configuration {
     enforce_workgroup_configuration    = true

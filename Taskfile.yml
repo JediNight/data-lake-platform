@@ -1,7 +1,6 @@
 version: '3'
 
 vars:
-  TF_AWS_DIR: terraform/aws
   CLUSTER_NAME: data-lake
   AWS_PROFILE_NAME: data-lake
   SSO_START_URL: https://mayadangelou.awsapps.com/start
@@ -29,7 +28,10 @@ tasks:
         done
         if [ "$ok" = false ]; then
           echo ""
-          echo "Install missing tools:"
+          echo "Install all tools at once with mise (https://mise.jdx.dev):"
+          echo "  mise install"
+          echo ""
+          echo "Or install individually:"
           echo "  AWS CLI:   https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
           echo "  Terraform: https://developer.hashicorp.com/terraform/install"
           echo "  Task:      https://taskfile.dev/installation"
@@ -38,30 +40,22 @@ tasks:
         echo ""
         echo "All tools installed."
 
+  reviewer:setup:
+    desc: "One-command setup: configure SSO profile + login + verify"
+    cmds:
+      - bash scripts/reviewer-setup.sh
+
   reviewer:sso:
-    desc: Configure AWS SSO profile for reviewer access
+    desc: Configure AWS SSO profile for reviewer access (use reviewer:setup for all-in-one)
     deps: [reviewer:check]
     cmds:
       - |
-        echo "================================================"
-        echo "  Data Lake Platform — SSO Setup"
-        echo "================================================"
-        echo ""
-        echo "This will create an AWS CLI profile named '{{.AWS_PROFILE_NAME}}'"
-        echo "using the SSO credentials provided in the submission."
-        echo ""
-        echo "SSO Portal: {{.SSO_START_URL}}"
-        echo "Region:     {{.SSO_REGION}}"
-        echo "Account:    {{.AWS_ACCOUNT_ID}}"
-        echo ""
-
-        # Write the SSO config directly (no interactive prompts)
         mkdir -p ~/.aws
         if grep -q '\[profile {{.AWS_PROFILE_NAME}}\]' ~/.aws/config 2>/dev/null; then
           echo "Profile '{{.AWS_PROFILE_NAME}}' already exists in ~/.aws/config."
           echo "To reconfigure, remove the existing profile and re-run."
         else
-          cat >> ~/.aws/config << 'SSOCONFIG'
+          cat >> ~/.aws/config << EOF
 
         [profile {{.AWS_PROFILE_NAME}}]
         sso_start_url = {{.SSO_START_URL}}
@@ -70,18 +64,11 @@ tasks:
         sso_role_name = Reviewer
         region = {{.SSO_REGION}}
         output = json
-        SSOCONFIG
+        EOF
           echo "Created AWS profile '{{.AWS_PROFILE_NAME}}' in ~/.aws/config"
         fi
-
         echo ""
-        echo "Next: Log in with the credentials from the submission notes:"
-        echo ""
-        echo "  aws sso login --profile {{.AWS_PROFILE_NAME}}"
-        echo ""
-        echo "Then verify access:"
-        echo ""
-        echo "  task reviewer:verify"
+        echo "Next: aws sso login --profile {{.AWS_PROFILE_NAME}}"
 
   reviewer:login:
     desc: Log in to AWS via SSO (opens browser)
@@ -204,6 +191,227 @@ tasks:
       - bash scripts/verify-e2e-pipeline.sh {{.TF_WORKSPACE | default "prod"}}
 
   # =========================================================================
+  # Kafka & KafkaConnect Debugging
+  # =========================================================================
+
+  reviewer:kafka-status:
+    desc: Show MSK cluster and connector health overview
+    preconditions:
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - |
+        WS={{.TF_WORKSPACE | default "prod"}}
+        echo "================================================"
+        echo "  Kafka & Connector Status (${WS})"
+        echo "================================================"
+        echo ""
+
+        echo "--- MSK Cluster ---"
+        CLUSTER_ARN=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws kafka list-clusters-v2 \
+          --query "ClusterInfoList[?ClusterName==\`datalake-msk-${WS}\`].ClusterArn" --output text)
+        if [ -z "$CLUSTER_ARN" ] || [ "$CLUSTER_ARN" = "None" ]; then
+          echo "No MSK cluster found for environment: ${WS}"
+        else
+          AWS_PROFILE={{.AWS_PROFILE_NAME}} aws kafka describe-cluster-v2 \
+            --cluster-arn "$CLUSTER_ARN" \
+            --query 'ClusterInfo.{Name:ClusterName,State:State,Version:Provisioned.CurrentBrokerSoftwareInfo.KafkaVersion,Brokers:Provisioned.NumberOfBrokerNodes}' \
+            --output table
+
+          echo ""
+          echo "--- Bootstrap Brokers (IAM) ---"
+          AWS_PROFILE={{.AWS_PROFILE_NAME}} aws kafka get-bootstrap-brokers \
+            --cluster-arn "$CLUSTER_ARN" \
+            --query 'BootstrapBrokerStringSaslIam' --output text
+        fi
+
+        echo ""
+        echo "--- MSK Connect Connectors ---"
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws kafkaconnect list-connectors \
+          --query 'connectors[].{Name:connectorName,State:connectorState,Created:creationTime}' \
+          --output table
+
+        echo ""
+        echo "--- Custom Plugins ---"
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws kafkaconnect list-custom-plugins \
+          --query 'customPlugins[].{Name:name,State:customPluginState}' \
+          --output table
+
+  reviewer:connector-logs:
+    desc: "Tail MSK Connect logs (CONNECTOR=debezium-source|iceberg-sink-mnpi|iceberg-sink-nonmnpi, FILTER=ERROR)"
+    preconditions:
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - |
+        WS={{.TF_WORKSPACE | default "prod"}}
+        LOG_GROUP="/msk-connect/datalake-${WS}"
+        FILTER="{{.FILTER | default ""}}"
+        CONNECTOR="{{.CONNECTOR | default ""}}"
+        LINES={{.LINES | default "100"}}
+
+        echo "Log group: ${LOG_GROUP}"
+
+        if [ -n "$FILTER" ]; then
+          echo "Filter:    ${FILTER}"
+          if [ -n "$CONNECTOR" ]; then
+            AWS_PROFILE={{.AWS_PROFILE_NAME}} aws logs filter-log-events \
+              --log-group-name "$LOG_GROUP" \
+              --log-stream-name-prefix "$CONNECTOR" \
+              --filter-pattern "$FILTER" \
+              --start-time $(($(date +%s) - 3600))000 \
+              --query 'events[].message' --output text | tail -${LINES}
+          else
+            AWS_PROFILE={{.AWS_PROFILE_NAME}} aws logs filter-log-events \
+              --log-group-name "$LOG_GROUP" \
+              --filter-pattern "$FILTER" \
+              --start-time $(($(date +%s) - 3600))000 \
+              --query 'events[].message' --output text | tail -${LINES}
+          fi
+        else
+          echo "Tailing last ${LINES} log events..."
+          AWS_PROFILE={{.AWS_PROFILE_NAME}} aws logs tail "$LOG_GROUP" --since 1h \
+            --format short 2>&1 | tail -${LINES}
+        fi
+
+  reviewer:topics:
+    desc: List Kafka topics and their partition counts
+    preconditions:
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - |
+        WS={{.TF_WORKSPACE | default "prod"}}
+        CLUSTER_ARN=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws kafka list-clusters-v2 \
+          --query "ClusterInfoList[?ClusterName==\`datalake-msk-${WS}\`].ClusterArn" --output text 2>/dev/null)
+        if [ -z "$CLUSTER_ARN" ] || [ "$CLUSTER_ARN" = "None" ]; then
+          echo "No MSK cluster found for environment: ${WS}"
+          exit 1
+        fi
+
+        echo "================================================"
+        echo "  Kafka Topics (${WS})"
+        echo "================================================"
+        echo ""
+        echo "Expected CDC topics:     cdc.trading.{orders,trades,positions,accounts,instruments}"
+        echo "Expected stream topics:  stream.market-data"
+        echo "Expected control topics: control-iceberg-mnpi, control-iceberg-nonmnpi"
+        echo ""
+
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws kafka list-topics \
+          --cluster-arn "$CLUSTER_ARN" \
+          --query 'Topics[].{Topic:TopicName,Partitions:PartitionCount,RF:ReplicationFactor}' \
+          --output table
+
+  reviewer:cdc-status:
+    desc: Check Aurora CDC health (replication slot, publication, table counts)
+    preconditions:
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - |
+        WS={{.TF_WORKSPACE | default "prod"}}
+        echo "================================================"
+        echo "  Aurora CDC Status (${WS})"
+        echo "================================================"
+        echo ""
+
+        CLUSTER_ARN=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws rds describe-db-clusters \
+          --db-cluster-identifier "datalake-${WS}" \
+          --query 'DBClusters[0].DBClusterArn' --output text 2>/dev/null)
+        if [ -z "$CLUSTER_ARN" ] || [ "$CLUSTER_ARN" = "None" ]; then
+          echo "No Aurora cluster found for environment: ${WS}"
+          exit 1
+        fi
+
+        SECRET_ARN=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws secretsmanager describe-secret \
+          --secret-id "datalake/aurora/${WS}/master-password" \
+          --query ARN --output text 2>/dev/null)
+        if [ -z "$SECRET_ARN" ] || [ "$SECRET_ARN" = "None" ]; then
+          echo "No secret found for Aurora ${WS}. Trying alternate name..."
+          SECRET_ARN=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws secretsmanager list-secrets \
+            --filter Key=name,Values=datalake \
+            --query 'SecretList[0].ARN' --output text)
+        fi
+
+        echo "--- Replication Slot (expect: debezium_slot, active=true) ---"
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws rds-data execute-statement \
+          --resource-arn "$CLUSTER_ARN" --secret-arn "$SECRET_ARN" \
+          --database trading \
+          --sql "SELECT slot_name, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS wal_lag FROM pg_replication_slots" \
+          --output json | python3 -c "
+        import json, sys
+        r = json.load(sys.stdin)['records']
+        if not r:
+          print('  No replication slots found')
+        else:
+          for row in r:
+            vals = [list(v.values())[0] for v in row]
+            print(f'  slot={vals[0]}  active={vals[1]}  wal_lag={vals[2]}')
+        "
+
+        echo ""
+        echo "--- Publication (expect: debezium_publication, 5 tables) ---"
+        AWS_PROFILE={{.AWS_PROFILE_NAME}} aws rds-data execute-statement \
+          --resource-arn "$CLUSTER_ARN" --secret-arn "$SECRET_ARN" \
+          --database trading \
+          --sql "SELECT schemaname || '.' || tablename AS table_name FROM pg_publication_tables WHERE pubname='debezium_publication' ORDER BY tablename" \
+          --output json | python3 -c "
+        import json, sys
+        r = json.load(sys.stdin)['records']
+        if not r:
+          print('  No publication tables found')
+        else:
+          for row in r:
+            print(f'  {list(row[0].values())[0]}')
+        "
+
+        echo ""
+        echo "--- Table Row Counts ---"
+        for tbl in orders trades positions accounts instruments; do
+          RESULT=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws rds-data execute-statement \
+            --resource-arn "$CLUSTER_ARN" --secret-arn "$SECRET_ARN" \
+            --database trading \
+            --sql "SELECT count(*) FROM public.${tbl}" \
+            --output json 2>/dev/null | python3 -c "import json,sys; print(list(json.load(sys.stdin)['records'][0][0].values())[0])" 2>/dev/null || echo "N/A")
+          printf "  %-15s %s rows\n" "$tbl" "$RESULT"
+        done
+
+  reviewer:s3-freshness:
+    desc: Show latest S3 data files per Iceberg table (data freshness check)
+    preconditions:
+      - sh: aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1
+        msg: "Not logged in. Run: task reviewer:login"
+    cmds:
+      - |
+        WS={{.TF_WORKSPACE | default "prod"}}
+        echo "================================================"
+        echo "  S3 Data Freshness (${WS})"
+        echo "================================================"
+        echo ""
+        echo "Showing most recent data file per raw table:"
+        echo "(Iceberg sink commits every 2 min when active)"
+        echo ""
+
+        for bucket_zone in "mnpi:orders,trades,positions" "nonmnpi:market_data,accounts,instruments"; do
+          ZONE="${bucket_zone%%:*}"
+          TABLES="${bucket_zone#*:}"
+          BUCKET="datalake-${ZONE}-${WS}"
+          echo "--- s3://${BUCKET} ---"
+          IFS=',' read -ra TBL_ARRAY <<< "$TABLES"
+          for tbl in "${TBL_ARRAY[@]}"; do
+            LATEST=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws s3 ls "s3://${BUCKET}/raw/${tbl}/data/" \
+              --recursive --human-readable 2>/dev/null | tail -1)
+            if [ -n "$LATEST" ]; then
+              printf "  %-15s %s\n" "$tbl" "$LATEST"
+            else
+              printf "  %-15s (no data files)\n" "$tbl"
+            fi
+          done
+          echo ""
+        done
+
+  # =========================================================================
   # Local Dev (Kind + ArgoCD + Strimzi)
   # =========================================================================
 
@@ -223,7 +431,10 @@ tasks:
         done
         if [ "$ok" = false ]; then
           echo ""
-          echo "Install missing tools:"
+          echo "Install all tools at once with mise (https://mise.jdx.dev):"
+          echo "  mise install"
+          echo ""
+          echo "Or install individually:"
           echo "  Kind:      https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
           echo "  Tilt:      https://docs.tilt.dev/install.html"
           echo "  Helm:      https://helm.sh/docs/intro/install/"
@@ -237,20 +448,18 @@ tasks:
     desc: "Spin up local dev environment: Kind cluster + ArgoCD + Strimzi + PostgreSQL + Producer API"
     deps: [dev:check]
     cmds:
-      # Phase 1: Terraform creates Kind cluster + ArgoCD + AWS infra (dev workspace)
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} init -upgrade
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} workspace select dev
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} apply -var-file=dev.tfvars -auto-approve
+      # Phase 1: Deploy all stacks (creates AWS infra in dev workspace)
+      - task: deploy:all
 
       # Phase 2: Build & load custom Kafka Connect image (Strimzi needs this)
       - |
         echo ""
         echo "Building Kafka Connect image with Iceberg JARs..."
-        docker build -t data-lake-connect:with-aws-v8 \
+        docker build -t data-lake-connect:local \
           -f dev/gitops/strimzi/docker/Dockerfile.connect \
           dev/gitops/strimzi/docker/
         echo "Loading image into Kind cluster..."
-        kind load docker-image data-lake-connect:with-aws-v8 --name {{.CLUSTER_NAME}}
+        kind load docker-image data-lake-connect:local --name {{.CLUSTER_NAME}}
 
       # Phase 3: AWS credentials are now managed by KSOPS (secret-generator.yaml
       #   in dev/gitops/strimzi/overlays/localdev/). ArgoCD decrypts the
@@ -325,8 +534,7 @@ tasks:
     desc: Tear down local dev environment completely
     cmds:
       - cd dev && tilt down 2>/dev/null || true
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} workspace select dev 2>/dev/null || true
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform -chdir={{.TF_AWS_DIR}} destroy -var-file=dev.tfvars -auto-approve 2>/dev/null || true
+      - task: destroy:all
       - kind delete cluster --name {{.CLUSTER_NAME}} 2>/dev/null || true
       - echo "Local dev environment torn down."
 
@@ -373,82 +581,115 @@ tasks:
       - bash scripts/integration/run-tests.sh
 
   # =========================================================================
-  # AWS Infrastructure
+  # Terraform Stack Operations
   # =========================================================================
 
-  aws:init:
-    desc: Initialize AWS Terraform (workspace-based)
+  tf:init:
+    desc: "Initialize a single stack (STACK=account-baseline|foundation|data-lake-core|security|compute|pipelines)"
+    dir: "terraform/aws/stacks/{{.STACK}}"
+    requires:
+      vars: [STACK]
     cmds:
-      - terraform -chdir={{.TF_AWS_DIR}} init -upgrade
-      - terraform -chdir={{.TF_AWS_DIR}} workspace select {{.TF_WORKSPACE | default "dev"}} 2>/dev/null || terraform -chdir={{.TF_AWS_DIR}} workspace new {{.TF_WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade
+      # account-baseline uses default workspace (no env isolation needed)
+      - |
+        if [ "{{.STACK}}" != "account-baseline" ]; then
+          terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || terraform workspace new {{.WORKSPACE | default "dev"}}
+        fi
 
-  aws:plan:
-    desc: Preview AWS infrastructure changes (TF_WORKSPACE=dev|prod)
+  tf:init-all:
+    desc: Initialize all Terraform stacks
     cmds:
-      - terraform -chdir={{.TF_AWS_DIR}} workspace select {{.TF_WORKSPACE | default "dev"}}
-      - terraform -chdir={{.TF_AWS_DIR}} plan -var-file={{.TF_WORKSPACE | default "dev"}}.tfvars
+      - for: [account-baseline, foundation, data-lake-core, security, compute, pipelines]
+        task: tf:init
+        vars: { STACK: "{{.ITEM}}" }
 
-  aws:apply:
-    desc: Apply AWS infrastructure (TF_WORKSPACE=dev|prod)
+  tf:plan:
+    desc: "Plan a single stack (STACK=account-baseline|foundation|data-lake-core|security|compute|pipelines)"
+    dir: "terraform/aws/stacks/{{.STACK}}"
+    requires:
+      vars: [STACK]
     cmds:
-      - terraform -chdir={{.TF_AWS_DIR}} workspace select {{.TF_WORKSPACE | default "dev"}}
-      - terraform -chdir={{.TF_AWS_DIR}} apply -var-file={{.TF_WORKSPACE | default "dev"}}.tfvars
+      - |
+        if [ "{{.STACK}}" != "account-baseline" ]; then
+          AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+        fi
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform plan
 
-  aws:destroy:
-    desc: Destroy AWS infrastructure (TF_WORKSPACE=dev|prod)
+  tf:plan-all:
+    desc: Plan all Terraform stacks in dependency order
     cmds:
-      - terraform -chdir={{.TF_AWS_DIR}} workspace select {{.TF_WORKSPACE | default "dev"}}
-      - terraform -chdir={{.TF_AWS_DIR}} destroy -var-file={{.TF_WORKSPACE | default "dev"}}.tfvars
+      - for: [account-baseline, foundation, data-lake-core, security, compute, pipelines]
+        task: tf:plan
+        vars: { STACK: "{{.ITEM}}" }
 
   # =========================================================================
-  # Per-Stack Deployment (State Decomposition)
+  # Per-Stack Deployment
   # =========================================================================
+
+  deploy:account-baseline:
+    desc: Deploy account-baseline stack (Identity Center, LF settings, LF-Tags, QuickSight)
+    dir: terraform/aws/stacks/account-baseline
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
 
   deploy:foundation:
     desc: Deploy foundation stack (VPC, subnets, security groups)
     dir: terraform/aws/stacks/foundation
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
 
   deploy:data-lake-core:
     desc: Deploy data-lake-core stack (S3, KMS, Glue catalog)
     dir: terraform/aws/stacks/data-lake-core
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
 
   deploy:security:
     desc: Deploy security stack (IAM, Lake Formation, observability, bucket policies)
     dir: terraform/aws/stacks/security
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
 
   deploy:compute:
     desc: Deploy compute stack (MSK, Aurora)
     dir: terraform/aws/stacks/compute
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
 
   deploy:pipelines:
     desc: Deploy pipelines stack (connectors, Lambda, Glue ETL, analytics)
     dir: terraform/aws/stacks/pipelines
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
 
+  deploy:tier-1:
+    desc: "Deploy independent stacks (foundation + data-lake-core) in parallel"
+    internal: true
+    deps: [deploy:foundation, deploy:data-lake-core]
+
+  deploy:tier-2:
+    desc: "Deploy dependent stacks (security + compute) in parallel"
+    internal: true
+    deps: [deploy:security, deploy:compute]
+
   deploy:all:
-    desc: Deploy all stacks in dependency order
+    desc: Deploy all stacks in dependency order (with parallelism)
     cmds:
-      # Stacks 1, 2, 3 — no interdependencies (but security needs buckets to exist for DENY policies)
-      - task: deploy:foundation
-      - task: deploy:data-lake-core
-      - task: deploy:security
-      # Stack 4 — depends on Stack 1 (VPC/SG IDs)
-      - task: deploy:compute
-      # Stack 5 — depends on Stacks 1 + 4 (VPC IDs + MSK/Aurora endpoints)
+      - task: deploy:account-baseline
+      - task: deploy:tier-1
+      - task: deploy:tier-2
       - task: deploy:pipelines
 
   # Per-stack destroy tasks (reverse order)
@@ -460,40 +701,53 @@ tasks:
       - task: destroy:security
       - task: destroy:data-lake-core
       - task: destroy:foundation
+      - task: destroy:account-baseline
+
+  destroy:account-baseline:
+    desc: Destroy account-baseline stack (Identity Center, LF settings — rarely needed)
+    dir: terraform/aws/stacks/account-baseline
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
 
   destroy:pipelines:
     desc: Destroy pipelines stack
     dir: terraform/aws/stacks/pipelines
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
 
   destroy:compute:
     desc: Destroy compute stack
     dir: terraform/aws/stacks/compute
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
 
   destroy:security:
     desc: Destroy security stack
     dir: terraform/aws/stacks/security
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
 
   destroy:data-lake-core:
     desc: Destroy data-lake-core stack
     dir: terraform/aws/stacks/data-lake-core
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
 
   destroy:foundation:
     desc: Destroy foundation stack
     dir: terraform/aws/stacks/foundation
     cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
 
   # =========================================================================
@@ -501,12 +755,15 @@ tasks:
   # =========================================================================
 
   validate:tf:
-    desc: Validate Terraform configuration
+    desc: Validate all Terraform stack configurations
     cmds:
       - |
-        echo "=== Validating AWS (workspace-based) ==="
-        terraform -chdir={{.TF_AWS_DIR}} init -backend=false -input=false > /dev/null 2>&1
-        terraform -chdir={{.TF_AWS_DIR}} validate
+        for stack in account-baseline foundation data-lake-core security compute pipelines; do
+          echo "=== Validating stack: $stack ==="
+          terraform -chdir=terraform/aws/stacks/$stack init -backend=false -input=false > /dev/null 2>&1
+          terraform -chdir=terraform/aws/stacks/$stack validate
+          echo ""
+        done
 
   # =========================================================================
   # Athena Queries
@@ -514,6 +771,8 @@ tasks:
 
   athena:query:
     desc: Run an Athena query and wait for results (QUERY="SELECT ...")
+    requires:
+      vars: [QUERY]
     cmds:
       - |
         QID=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena start-query-execution \
@@ -543,17 +802,19 @@ tasks:
     desc: Run demo queries showing end-to-end data flow
     cmds:
       - |
+        WS={{.TF_WORKSPACE | default "prod"}}
+        WG="data-engineers-${WS}"
         echo "=== Raw MNPI Orders (count) ==="
-        task athena:query QUERY="SELECT count(*) AS raw_orders FROM raw_mnpi_{{.TF_WORKSPACE | default \"prod\"}}.orders"
+        task athena:query QUERY="SELECT count(*) AS raw_orders FROM raw_mnpi_${WS}.orders" WORKGROUP="${WG}"
         echo ""
         echo "=== Raw Non-MNPI Market Data (count) ==="
-        task athena:query QUERY="SELECT count(*) AS raw_ticks FROM raw_nonmnpi_{{.TF_WORKSPACE | default \"prod\"}}.market_data"
+        task athena:query QUERY="SELECT count(*) AS raw_ticks FROM raw_nonmnpi_${WS}.market_data" WORKGROUP="${WG}"
         echo ""
         echo "=== Curated Order Events ==="
-        task athena:query QUERY="SELECT count(*) AS curated_orders FROM curated_mnpi_{{.TF_WORKSPACE | default \"prod\"}}.order_events"
+        task athena:query QUERY="SELECT count(*) AS curated_orders FROM curated_mnpi_${WS}.order_events" WORKGROUP="${WG}"
         echo ""
         echo "=== Analytics: Order Summary by Instrument ==="
-        task athena:query QUERY="SELECT instrument_id, total_orders, buy_orders, sell_orders, total_volume FROM analytics_mnpi_{{.TF_WORKSPACE | default \"prod\"}}.order_summary ORDER BY total_orders DESC"
+        task athena:query QUERY="SELECT instrument_id, total_orders, buy_orders, sell_orders, total_volume FROM analytics_mnpi_${WS}.order_summary ORDER BY total_orders DESC" WORKGROUP="${WG}"
         echo ""
         echo "=== Analytics: Market Summary by Ticker ==="
-        task athena:query QUERY="SELECT ticker, tick_count, avg_price, avg_spread, spread_pct FROM analytics_nonmnpi_{{.TF_WORKSPACE | default \"prod\"}}.market_summary ORDER BY tick_count DESC"
+        task athena:query QUERY="SELECT ticker, tick_count, avg_price, avg_spread, spread_pct FROM analytics_nonmnpi_${WS}.market_summary ORDER BY tick_count DESC" WORKGROUP="${WG}"

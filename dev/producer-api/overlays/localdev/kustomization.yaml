@@ -10,4 +10,4 @@ patches:
 images:
   - name: producer-api
     newName: producer-api
-    newTag: localdev-1772326913
+    newTag: local
