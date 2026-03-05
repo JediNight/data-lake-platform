@@ -68,6 +68,20 @@ resource "aws_s3_bucket" "plugins" {
   force_destroy = true
 }
 
+resource "null_resource" "upload_plugins" {
+  triggers = {
+    bucket_id         = aws_s3_bucket.plugins.id
+    debezium_version  = var.debezium_version
+    iceberg_version   = var.iceberg_connector_version
+  }
+
+  provisioner "local-exec" {
+    command = "bash ${path.module}/../../../../scripts/upload-connector-plugins.sh ${var.environment}"
+  }
+
+  depends_on = [aws_s3_bucket.plugins]
+}
+
 resource "aws_mskconnect_custom_plugin" "debezium" {
   name         = "debezium-postgres-${var.environment}"
   content_type = "ZIP"
@@ -78,6 +92,8 @@ resource "aws_mskconnect_custom_plugin" "debezium" {
       file_key   = "debezium-postgres/debezium-connector-postgres-${var.debezium_version}-plugin.zip"
     }
   }
+
+  depends_on = [null_resource.upload_plugins]
 }
 
 resource "aws_mskconnect_custom_plugin" "iceberg_sink" {
@@ -90,6 +106,8 @@ resource "aws_mskconnect_custom_plugin" "iceberg_sink" {
       file_key   = "iceberg-sink/iceberg-kafka-connect-runtime-${var.iceberg_connector_version}.zip"
     }
   }
+
+  depends_on = [null_resource.upload_plugins]
 }
 
 # =============================================================================

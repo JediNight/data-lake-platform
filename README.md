@@ -10,12 +10,19 @@ The entire infrastructure is defined in Terraform (~200 AWS resources across 6 s
 
 ### Prerequisites
 
-```bash
-# Install all tools at once (terraform, aws-cli, kind, kubectl, helm, etc.)
-mise install
+This project uses [mise](https://mise.jdx.dev) to manage tool versions (Terraform, AWS CLI, Kind, kubectl, Helm, etc.). Install mise first, then let it handle everything else:
 
-# Or manually: Terraform >= 1.9, AWS CLI v2, Task (https://taskfile.dev)
+```bash
+# 1. Install mise (https://mise.jdx.dev/getting-started.html)
+curl https://mise.run | sh
+echo 'eval "$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc   # or bash → ~/.bashrc
+source ~/.zshrc
+
+# 2. Install all project tools (terraform 1.9.8, aws-cli 2, kind, kubectl, helm, etc.)
+mise trust && mise install
 ```
+
+If you'd rather not use mise, install these manually: Terraform >= 1.9, AWS CLI v2, [Task](https://taskfile.dev), Kind, kubectl, Helm, kustomize, Tilt.
 
 ### Authenticate
 

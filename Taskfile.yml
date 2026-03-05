@@ -9,6 +9,433 @@ vars:
 
 tasks:
   # =========================================================================
+  # Local Dev (Kind + ArgoCD + Strimzi)
+  # =========================================================================
+
+  dev:check:
+    desc: Check local dev tools are installed (kind, tilt, helm, kubectl, kustomize)
+    silent: true
+    cmds:
+      - |
+        ok=true
+        for tool in kind tilt helm kubectl kustomize docker; do
+          if command -v "$tool" > /dev/null 2>&1; then
+            printf "  ✓ %-12s %s\n" "$tool" "$(command -v $tool)"
+          else
+            printf "  ✗ %-12s MISSING\n" "$tool"
+            ok=false
+          fi
+        done
+        if [ "$ok" = false ]; then
+          echo ""
+          echo "Install all tools at once with mise (https://mise.jdx.dev):"
+          echo "  mise install"
+          echo ""
+          echo "Or install individually:"
+          echo "  Kind:      https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
+          echo "  Tilt:      https://docs.tilt.dev/install.html"
+          echo "  Helm:      https://helm.sh/docs/intro/install/"
+          echo "  Kustomize: https://kubectl.docs.kubernetes.io/installation/kustomize/"
+          exit 1
+        fi
+        echo ""
+        echo "All dev tools installed."
+
+  dev:up:
+    desc: "Spin up local dev environment: Kind cluster + ArgoCD + Strimzi + PostgreSQL + Producer API"
+    deps: [dev:check]
+    cmds:
+      # Phase 1: Deploy all stacks (creates AWS infra in dev workspace)
+      - task: deploy:all
+
+      # Phase 2: Build & load container images into Kind
+      #   Must happen BEFORE ArgoCD syncs, otherwise pods get ImagePullBackOff.
+      - |
+        echo ""
+        echo "Building Kafka Connect image with Iceberg JARs..."
+        docker build -t data-lake-connect:local \
+          -f dev/gitops/strimzi/docker/Dockerfile.connect \
+          dev/gitops/strimzi/docker/
+        echo "Loading image into Kind cluster..."
+        kind load docker-image data-lake-connect:local --name {{.CLUSTER_NAME}}
+      - |
+        echo ""
+        echo "Building Producer API image..."
+        docker build -t producer-api:local dev/producer-api/
+        echo "Loading image into Kind cluster..."
+        kind load docker-image producer-api:local --name {{.CLUSTER_NAME}}
+
+      # Phase 3: AWS credentials are now managed by KSOPS (secret-generator.yaml
+      #   in dev/gitops/strimzi/overlays/localdev/). ArgoCD decrypts the
+      #   encrypted secret.enc.yaml and applies it automatically on sync.
+      #   Run 'task dev:refresh-creds' to re-encrypt after SSO token refresh.
+
+      # Phase 4: Wait for ArgoCD to reconcile everything
+      - |
+        echo ""
+        echo "Waiting for ArgoCD applications to sync..."
+        kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy \
+          applications --all --timeout=300s 2>/dev/null || true
+
+      # Phase 5: Show status + ArgoCD credentials
+      - task: dev:status
+      - |
+        echo ""
+        echo "================================================"
+        echo "  ArgoCD UI"
+        echo "================================================"
+        echo "  URL:      http://localhost:8080"
+        echo "  Username: admin"
+        echo "  Password: datalake-admin"
+        echo ""
+        echo "Run 'task dev:tilt' for the inner dev loop."
+
+  dev:down:
+    desc: Tear down local dev environment completely
+    cmds:
+      - cd dev && tilt down 2>/dev/null || true
+      - task: destroy:all
+      - kind delete cluster --name {{.CLUSTER_NAME}} 2>/dev/null || true
+      - echo "Local dev environment torn down."
+
+  dev:tilt:
+    desc: Start Tilt dev loop (Kind cluster must exist)
+    dir: dev
+    cmds:
+      - tilt up
+
+  dev:status:
+    desc: Show local dev cluster status (pods, apps, connectors)
+    cmds:
+      - |
+        echo "================================================"
+        echo "  Local Dev Environment — Status"
+        echo "================================================"
+        echo ""
+        echo "--- Kind Cluster ---"
+        kind get clusters 2>/dev/null | grep {{.CLUSTER_NAME}} || echo "NOT RUNNING"
+        echo ""
+        echo "--- ArgoCD Applications ---"
+        kubectl -n argocd get applications 2>/dev/null || echo "ArgoCD not ready"
+        echo ""
+        echo "--- Strimzi (Kafka + Connect) ---"
+        kubectl -n strimzi get pods 2>/dev/null || echo "Strimzi not ready"
+        echo ""
+        echo "--- Data Namespace (PostgreSQL + Producer API) ---"
+        kubectl -n data get pods 2>/dev/null || echo "Data namespace not ready"
+        echo ""
+        echo "--- Kafka Connectors ---"
+        kubectl -n strimzi get kafkaconnectors 2>/dev/null || echo "No connectors"
+
+  dev:refresh-creds:
+    desc: "Refresh AWS credentials in KSOPS encrypted secret (run after 'aws sso login')"
+    cmds:
+      - |
+        if ! aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1; then
+          echo "ERROR: Not logged in to AWS profile '{{.AWS_PROFILE_NAME}}'."
+          echo "Run:  task reviewer:login"
+          exit 1
+        fi
+        TMPDIR=$(mktemp -d)
+        aws configure export-credentials --profile {{.AWS_PROFILE_NAME}} --format process \
+          | python3 -c "
+        import json, sys
+        c = json.load(sys.stdin)
+        print('[default]')
+        print(f'aws_access_key_id = {c[\"AccessKeyId\"]}')
+        print(f'aws_secret_access_key = {c[\"SecretAccessKey\"]}')
+        print(f'aws_session_token = {c[\"SessionToken\"]}')
+        " > "${TMPDIR}/credentials"
+
+        SECRET_FILE=dev/gitops/strimzi/overlays/localdev/secret.yaml
+        cat > "${SECRET_FILE}" << ENDOFSECRET
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: aws-credentials
+        type: Opaque
+        stringData:
+          credentials: |
+        $(sed 's/^/        /' "${TMPDIR}/credentials")
+          config: |
+            [default]
+            region = {{.SSO_REGION}}
+            output = json
+        ENDOFSECRET
+
+        cd dev && SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
+          sops -e gitops/strimzi/overlays/localdev/secret.yaml \
+          > gitops/strimzi/overlays/localdev/secret.enc.yaml
+        rm -f gitops/strimzi/overlays/localdev/secret.yaml
+        rm -rf "${TMPDIR}"
+        echo "Encrypted credentials updated in secret.enc.yaml."
+        echo "ArgoCD will sync automatically (or run: task dev:argocd-sync)."
+
+  dev:argocd-password:
+    desc: Get ArgoCD admin password for local dev
+    cmds:
+      - |
+        echo "ArgoCD UI:  http://localhost:8080"
+        echo "Username:   admin"
+        echo "Password:   datalake-admin"
+
+  dev:test:
+    desc: Run local integration tests (Kind cluster must be running)
+    cmds:
+      - bash scripts/integration/run-tests.sh
+
+  # =========================================================================
+  # Terraform Stack Operations
+  # =========================================================================
+
+  tf:init:
+    desc: "Initialize a single stack (STACK=account-baseline|foundation|data-lake-core|security|compute|pipelines)"
+    dir: "terraform/aws/stacks/{{.STACK}}"
+    requires:
+      vars: [STACK]
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade
+      # account-baseline uses default workspace (no env isolation needed)
+      - |
+        if [ "{{.STACK}}" != "account-baseline" ]; then
+          terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || terraform workspace new {{.WORKSPACE | default "dev"}}
+        fi
+
+  tf:init-all:
+    desc: Initialize all Terraform stacks
+    cmds:
+      - for: [account-baseline, foundation, data-lake-core, security, compute, pipelines]
+        task: tf:init
+        vars: { STACK: "{{.ITEM}}" }
+
+  tf:plan:
+    desc: "Plan a single stack (STACK=account-baseline|foundation|data-lake-core|security|compute|pipelines)"
+    dir: "terraform/aws/stacks/{{.STACK}}"
+    requires:
+      vars: [STACK]
+    cmds:
+      - |
+        if [ "{{.STACK}}" != "account-baseline" ]; then
+          AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
+        fi
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform plan
+
+  tf:plan-all:
+    desc: Plan all Terraform stacks in dependency order
+    cmds:
+      - for: [account-baseline, foundation, data-lake-core, security, compute, pipelines]
+        task: tf:plan
+        vars: { STACK: "{{.ITEM}}" }
+
+  # =========================================================================
+  # Per-Stack Deployment
+  # =========================================================================
+
+  deploy:account-baseline:
+    desc: Deploy account-baseline stack (Identity Center, LF settings, LF-Tags, QuickSight)
+    dir: terraform/aws/stacks/account-baseline
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:foundation:
+    desc: Deploy foundation stack (VPC, subnets, security groups)
+    dir: terraform/aws/stacks/foundation
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:data-lake-core:
+    desc: Deploy data-lake-core stack (S3, KMS, Glue catalog)
+    dir: terraform/aws/stacks/data-lake-core
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:security:
+    desc: Deploy security stack (IAM, Lake Formation, observability, bucket policies)
+    dir: terraform/aws/stacks/security
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:compute:
+    desc: Deploy compute stack (MSK, Aurora)
+    dir: terraform/aws/stacks/compute
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+
+  deploy:pipelines:
+    desc: Deploy pipelines stack (connectors, Lambda, Glue ETL, analytics)
+    dir: terraform/aws/stacks/pipelines
+    cmds:
+      # Plugin upload + Aurora CDC init are handled by null_resources in Terraform:
+      #   - msk-connect module: null_resource.upload_plugins (after S3 bucket, before custom_plugin)
+      #   - aurora-postgres module: null_resource.cdc_setup (after Aurora, gated via cdc_ready_gate)
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+      # Post-deploy (prod only): start Glue medallion workflow now that tables exist
+      - |
+        WORKSPACE="{{.WORKSPACE | default "dev"}}"
+        if [ "$WORKSPACE" = "prod" ]; then
+          echo ""
+          echo "Starting Glue medallion workflow..."
+          AWS_PROFILE={{.AWS_PROFILE_NAME}} aws glue start-workflow-run --name datalake-medallion-prod --region {{.SSO_REGION}}
+          echo "Deployment complete."
+        fi
+
+  deploy:tier-1:
+    desc: "Deploy independent stacks (foundation + data-lake-core) in parallel"
+    internal: true
+    deps: [deploy:foundation, deploy:data-lake-core]
+
+  deploy:tier-2:
+    desc: "Deploy dependent stacks (security + compute) in parallel"
+    internal: true
+    deps: [deploy:security, deploy:compute]
+
+  deploy:all:
+    desc: Deploy all stacks in dependency order (with parallelism)
+    cmds:
+      - task: deploy:account-baseline
+      - task: deploy:tier-1
+      - task: deploy:tier-2
+      - task: deploy:pipelines
+
+  # Per-stack destroy tasks (reverse order)
+  destroy:all:
+    desc: Destroy all stacks in reverse dependency order
+    cmds:
+      - task: destroy:pipelines
+      - task: destroy:compute
+      - task: destroy:security
+      - task: destroy:data-lake-core
+      - task: destroy:foundation
+      - task: destroy:account-baseline
+
+  destroy:account-baseline:
+    desc: Destroy account-baseline stack (Identity Center, LF settings — rarely needed)
+    dir: terraform/aws/stacks/account-baseline
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:pipelines:
+    desc: Destroy pipelines stack
+    dir: terraform/aws/stacks/pipelines
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:compute:
+    desc: Destroy compute stack
+    dir: terraform/aws/stacks/compute
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:security:
+    desc: Destroy security stack
+    dir: terraform/aws/stacks/security
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:data-lake-core:
+    desc: Destroy data-lake-core stack
+    dir: terraform/aws/stacks/data-lake-core
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  destroy:foundation:
+    desc: Destroy foundation stack
+    dir: terraform/aws/stacks/foundation
+    cmds:
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
+      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
+
+  # =========================================================================
+  # Validation
+  # =========================================================================
+
+  validate:tf:
+    desc: Validate all Terraform stack configurations
+    cmds:
+      - |
+        for stack in account-baseline foundation data-lake-core security compute pipelines; do
+          echo "=== Validating stack: $stack ==="
+          terraform -chdir=terraform/aws/stacks/$stack init -backend=false -input=false > /dev/null 2>&1
+          terraform -chdir=terraform/aws/stacks/$stack validate
+          echo ""
+        done
+
+  # =========================================================================
+  # Athena Queries
+  # =========================================================================
+
+  athena:query:
+    desc: Run an Athena query and wait for results (QUERY="SELECT ...")
+    requires:
+      vars: [QUERY]
+    cmds:
+      - |
+        QID=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena start-query-execution \
+          --query-string "{{.QUERY}}" \
+          --work-group {{.WORKGROUP | default "data-engineers-dev"}} \
+          --query 'QueryExecutionId' --output text)
+        echo "Query ID: $QID"
+        echo "Waiting..."
+        while true; do
+          STATE=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-execution \
+            --query-execution-id "$QID" \
+            --query 'QueryExecution.Status.State' --output text)
+          if [ "$STATE" = "SUCCEEDED" ]; then
+            AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-results \
+              --query-execution-id "$QID" --output table
+            break
+          elif [ "$STATE" = "FAILED" ] || [ "$STATE" = "CANCELLED" ]; then
+            AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-execution \
+              --query-execution-id "$QID" \
+              --query 'QueryExecution.Status.StateChangeReason' --output text
+            break
+          fi
+          sleep 2
+        done
+
+  athena:demo:
+    desc: Run demo queries showing end-to-end data flow
+    cmds:
+      - |
+        WS={{.TF_WORKSPACE | default "prod"}}
+        WG="data-engineers-${WS}"
+        echo "=== Raw MNPI Orders (count) ==="
+        task athena:query QUERY="SELECT count(*) AS raw_orders FROM raw_mnpi_${WS}.orders" WORKGROUP="${WG}"
+        echo ""
+        echo "=== Raw Non-MNPI Market Data (count) ==="
+        task athena:query QUERY="SELECT count(*) AS raw_ticks FROM raw_nonmnpi_${WS}.market_data" WORKGROUP="${WG}"
+        echo ""
+        echo "=== Curated Order Events ==="
+        task athena:query QUERY="SELECT count(*) AS curated_orders FROM curated_mnpi_${WS}.order_events" WORKGROUP="${WG}"
+        echo ""
+        echo "=== Analytics: Order Summary by Instrument ==="
+        task athena:query QUERY="SELECT instrument_id, total_orders, buy_orders, sell_orders, total_volume FROM analytics_mnpi_${WS}.order_summary ORDER BY total_orders DESC" WORKGROUP="${WG}"
+        echo ""
+        echo "=== Analytics: Market Summary by Ticker ==="
+        task athena:query QUERY="SELECT ticker, tick_count, avg_price, avg_spread, spread_pct FROM analytics_nonmnpi_${WS}.market_summary ORDER BY tick_count DESC" WORKGROUP="${WG}"
+
+  # =========================================================================
   # Reviewer Onboarding
   # =========================================================================
 
@@ -410,434 +837,3 @@ tasks:
           done
           echo ""
         done
-
-  # =========================================================================
-  # Local Dev (Kind + ArgoCD + Strimzi)
-  # =========================================================================
-
-  dev:check:
-    desc: Check local dev tools are installed (kind, tilt, helm, kubectl, kustomize)
-    silent: true
-    cmds:
-      - |
-        ok=true
-        for tool in kind tilt helm kubectl kustomize docker; do
-          if command -v "$tool" > /dev/null 2>&1; then
-            printf "  ✓ %-12s %s\n" "$tool" "$(command -v $tool)"
-          else
-            printf "  ✗ %-12s MISSING\n" "$tool"
-            ok=false
-          fi
-        done
-        if [ "$ok" = false ]; then
-          echo ""
-          echo "Install all tools at once with mise (https://mise.jdx.dev):"
-          echo "  mise install"
-          echo ""
-          echo "Or install individually:"
-          echo "  Kind:      https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
-          echo "  Tilt:      https://docs.tilt.dev/install.html"
-          echo "  Helm:      https://helm.sh/docs/intro/install/"
-          echo "  Kustomize: https://kubectl.docs.kubernetes.io/installation/kustomize/"
-          exit 1
-        fi
-        echo ""
-        echo "All dev tools installed."
-
-  dev:up:
-    desc: "Spin up local dev environment: Kind cluster + ArgoCD + Strimzi + PostgreSQL + Producer API"
-    deps: [dev:check]
-    cmds:
-      # Phase 1: Deploy all stacks (creates AWS infra in dev workspace)
-      - task: deploy:all
-
-      # Phase 2: Build & load container images into Kind
-      #   Must happen BEFORE ArgoCD syncs, otherwise pods get ImagePullBackOff.
-      - |
-        echo ""
-        echo "Building Kafka Connect image with Iceberg JARs..."
-        docker build -t data-lake-connect:local \
-          -f dev/gitops/strimzi/docker/Dockerfile.connect \
-          dev/gitops/strimzi/docker/
-        echo "Loading image into Kind cluster..."
-        kind load docker-image data-lake-connect:local --name {{.CLUSTER_NAME}}
-      - |
-        echo ""
-        echo "Building Producer API image..."
-        docker build -t producer-api:local dev/producer-api/
-        echo "Loading image into Kind cluster..."
-        kind load docker-image producer-api:local --name {{.CLUSTER_NAME}}
-
-      # Phase 3: AWS credentials are now managed by KSOPS (secret-generator.yaml
-      #   in dev/gitops/strimzi/overlays/localdev/). ArgoCD decrypts the
-      #   encrypted secret.enc.yaml and applies it automatically on sync.
-      #   Run 'task dev:refresh-creds' to re-encrypt after SSO token refresh.
-
-      # Phase 4: Wait for ArgoCD to reconcile everything
-      - |
-        echo ""
-        echo "Waiting for ArgoCD applications to sync..."
-        kubectl -n argocd wait --for=jsonpath='{.status.health.status}'=Healthy \
-          applications --all --timeout=300s 2>/dev/null || true
-
-      # Phase 5: Show status + ArgoCD credentials
-      - task: dev:status
-      - |
-        echo ""
-        echo "================================================"
-        echo "  ArgoCD UI"
-        echo "================================================"
-        echo "  URL:      http://localhost:8080"
-        echo "  Username: admin"
-        echo "  Password: datalake-admin"
-        echo ""
-        echo "Run 'task dev:tilt' for the inner dev loop."
-
-  dev:refresh-creds:
-    desc: "Refresh AWS credentials in KSOPS encrypted secret (run after 'aws sso login')"
-    cmds:
-      - |
-        if ! aws sts get-caller-identity --profile {{.AWS_PROFILE_NAME}} > /dev/null 2>&1; then
-          echo "ERROR: Not logged in to AWS profile '{{.AWS_PROFILE_NAME}}'."
-          echo "Run:  task reviewer:login"
-          exit 1
-        fi
-        TMPDIR=$(mktemp -d)
-        aws configure export-credentials --profile {{.AWS_PROFILE_NAME}} --format process \
-          | python3 -c "
-        import json, sys
-        c = json.load(sys.stdin)
-        print('[default]')
-        print(f'aws_access_key_id = {c[\"AccessKeyId\"]}')
-        print(f'aws_secret_access_key = {c[\"SecretAccessKey\"]}')
-        print(f'aws_session_token = {c[\"SessionToken\"]}')
-        " > "${TMPDIR}/credentials"
-
-        SECRET_FILE=dev/gitops/strimzi/overlays/localdev/secret.yaml
-        cat > "${SECRET_FILE}" << ENDOFSECRET
-        apiVersion: v1
-        kind: Secret
-        metadata:
-          name: aws-credentials
-        type: Opaque
-        stringData:
-          credentials: |
-        $(sed 's/^/        /' "${TMPDIR}/credentials")
-          config: |
-            [default]
-            region = {{.SSO_REGION}}
-            output = json
-        ENDOFSECRET
-
-        cd dev && SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
-          sops -e gitops/strimzi/overlays/localdev/secret.yaml \
-          > gitops/strimzi/overlays/localdev/secret.enc.yaml
-        rm -f gitops/strimzi/overlays/localdev/secret.yaml
-        rm -rf "${TMPDIR}"
-        echo "Encrypted credentials updated in secret.enc.yaml."
-        echo "ArgoCD will sync automatically (or run: task dev:argocd-sync)."
-
-  dev:down:
-    desc: Tear down local dev environment completely
-    cmds:
-      - cd dev && tilt down 2>/dev/null || true
-      - task: destroy:all
-      - kind delete cluster --name {{.CLUSTER_NAME}} 2>/dev/null || true
-      - echo "Local dev environment torn down."
-
-  dev:tilt:
-    desc: Start Tilt dev loop (Kind cluster must exist)
-    dir: dev
-    cmds:
-      - tilt up
-
-  dev:status:
-    desc: Show local dev cluster status (pods, apps, connectors)
-    cmds:
-      - |
-        echo "================================================"
-        echo "  Local Dev Environment — Status"
-        echo "================================================"
-        echo ""
-        echo "--- Kind Cluster ---"
-        kind get clusters 2>/dev/null | grep {{.CLUSTER_NAME}} || echo "NOT RUNNING"
-        echo ""
-        echo "--- ArgoCD Applications ---"
-        kubectl -n argocd get applications 2>/dev/null || echo "ArgoCD not ready"
-        echo ""
-        echo "--- Strimzi (Kafka + Connect) ---"
-        kubectl -n strimzi get pods 2>/dev/null || echo "Strimzi not ready"
-        echo ""
-        echo "--- Data Namespace (PostgreSQL + Producer API) ---"
-        kubectl -n data get pods 2>/dev/null || echo "Data namespace not ready"
-        echo ""
-        echo "--- Kafka Connectors ---"
-        kubectl -n strimzi get kafkaconnectors 2>/dev/null || echo "No connectors"
-
-  dev:argocd-password:
-    desc: Get ArgoCD admin password for local dev
-    cmds:
-      - |
-        echo "ArgoCD UI:  http://localhost:8080"
-        echo "Username:   admin"
-        echo "Password:   datalake-admin"
-
-  dev:test:
-    desc: Run local integration tests (Kind cluster must be running)
-    cmds:
-      - bash scripts/integration/run-tests.sh
-
-  # =========================================================================
-  # Terraform Stack Operations
-  # =========================================================================
-
-  tf:init:
-    desc: "Initialize a single stack (STACK=account-baseline|foundation|data-lake-core|security|compute|pipelines)"
-    dir: "terraform/aws/stacks/{{.STACK}}"
-    requires:
-      vars: [STACK]
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade
-      # account-baseline uses default workspace (no env isolation needed)
-      - |
-        if [ "{{.STACK}}" != "account-baseline" ]; then
-          terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || terraform workspace new {{.WORKSPACE | default "dev"}}
-        fi
-
-  tf:init-all:
-    desc: Initialize all Terraform stacks
-    cmds:
-      - for: [account-baseline, foundation, data-lake-core, security, compute, pipelines]
-        task: tf:init
-        vars: { STACK: "{{.ITEM}}" }
-
-  tf:plan:
-    desc: "Plan a single stack (STACK=account-baseline|foundation|data-lake-core|security|compute|pipelines)"
-    dir: "terraform/aws/stacks/{{.STACK}}"
-    requires:
-      vars: [STACK]
-    cmds:
-      - |
-        if [ "{{.STACK}}" != "account-baseline" ]; then
-          AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}}
-        fi
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform plan
-
-  tf:plan-all:
-    desc: Plan all Terraform stacks in dependency order
-    cmds:
-      - for: [account-baseline, foundation, data-lake-core, security, compute, pipelines]
-        task: tf:plan
-        vars: { STACK: "{{.ITEM}}" }
-
-  # =========================================================================
-  # Per-Stack Deployment
-  # =========================================================================
-
-  deploy:account-baseline:
-    desc: Deploy account-baseline stack (Identity Center, LF settings, LF-Tags, QuickSight)
-    dir: terraform/aws/stacks/account-baseline
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
-
-  deploy:foundation:
-    desc: Deploy foundation stack (VPC, subnets, security groups)
-    dir: terraform/aws/stacks/foundation
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
-
-  deploy:data-lake-core:
-    desc: Deploy data-lake-core stack (S3, KMS, Glue catalog)
-    dir: terraform/aws/stacks/data-lake-core
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
-
-  deploy:security:
-    desc: Deploy security stack (IAM, Lake Formation, observability, bucket policies)
-    dir: terraform/aws/stacks/security
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
-
-  deploy:compute:
-    desc: Deploy compute stack (MSK, Aurora)
-    dir: terraform/aws/stacks/compute
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
-
-  deploy:pipelines:
-    desc: Deploy pipelines stack (connectors, Lambda, Glue ETL, analytics)
-    dir: terraform/aws/stacks/pipelines
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
-      # Post-deploy: upload connector plugins, init CDC, start Glue (prod only)
-      - |
-        WORKSPACE="{{.WORKSPACE | default "dev"}}"
-        if [ "$WORKSPACE" = "prod" ]; then
-          echo ""
-          echo "Running post-deploy setup for prod..."
-          echo "Uploading MSK Connect connector JARs..."
-          ../../scripts/upload-connector-plugins.sh prod
-          echo ""
-          echo "Initializing Aurora CDC (replication slot + publication + seed tables)..."
-          ../../scripts/init-aurora-cdc.sh prod
-          echo ""
-          echo "Starting Glue medallion workflow..."
-          AWS_PROFILE={{.AWS_PROFILE_NAME}} aws glue start-workflow-run --name datalake-medallion-prod --region {{.SSO_REGION}}
-          echo "Post-deploy complete."
-        fi
-
-  deploy:tier-1:
-    desc: "Deploy independent stacks (foundation + data-lake-core) in parallel"
-    internal: true
-    deps: [deploy:foundation, deploy:data-lake-core]
-
-  deploy:tier-2:
-    desc: "Deploy dependent stacks (security + compute) in parallel"
-    internal: true
-    deps: [deploy:security, deploy:compute]
-
-  deploy:all:
-    desc: Deploy all stacks in dependency order (with parallelism)
-    cmds:
-      - task: deploy:account-baseline
-      - task: deploy:tier-1
-      - task: deploy:tier-2
-      - task: deploy:pipelines
-
-  # Per-stack destroy tasks (reverse order)
-  destroy:all:
-    desc: Destroy all stacks in reverse dependency order
-    cmds:
-      - task: destroy:pipelines
-      - task: destroy:compute
-      - task: destroy:security
-      - task: destroy:data-lake-core
-      - task: destroy:foundation
-      - task: destroy:account-baseline
-
-  destroy:account-baseline:
-    desc: Destroy account-baseline stack (Identity Center, LF settings — rarely needed)
-    dir: terraform/aws/stacks/account-baseline
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
-
-  destroy:pipelines:
-    desc: Destroy pipelines stack
-    dir: terraform/aws/stacks/pipelines
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
-
-  destroy:compute:
-    desc: Destroy compute stack
-    dir: terraform/aws/stacks/compute
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
-
-  destroy:security:
-    desc: Destroy security stack
-    dir: terraform/aws/stacks/security
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
-
-  destroy:data-lake-core:
-    desc: Destroy data-lake-core stack
-    dir: terraform/aws/stacks/data-lake-core
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
-
-  destroy:foundation:
-    desc: Destroy foundation stack
-    dir: terraform/aws/stacks/foundation
-    cmds:
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
-      - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform destroy -auto-approve
-
-  # =========================================================================
-  # Validation
-  # =========================================================================
-
-  validate:tf:
-    desc: Validate all Terraform stack configurations
-    cmds:
-      - |
-        for stack in account-baseline foundation data-lake-core security compute pipelines; do
-          echo "=== Validating stack: $stack ==="
-          terraform -chdir=terraform/aws/stacks/$stack init -backend=false -input=false > /dev/null 2>&1
-          terraform -chdir=terraform/aws/stacks/$stack validate
-          echo ""
-        done
-
-  # =========================================================================
-  # Athena Queries
-  # =========================================================================
-
-  athena:query:
-    desc: Run an Athena query and wait for results (QUERY="SELECT ...")
-    requires:
-      vars: [QUERY]
-    cmds:
-      - |
-        QID=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena start-query-execution \
-          --query-string "{{.QUERY}}" \
-          --work-group {{.WORKGROUP | default "data-engineers-dev"}} \
-          --query 'QueryExecutionId' --output text)
-        echo "Query ID: $QID"
-        echo "Waiting..."
-        while true; do
-          STATE=$(AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-execution \
-            --query-execution-id "$QID" \
-            --query 'QueryExecution.Status.State' --output text)
-          if [ "$STATE" = "SUCCEEDED" ]; then
-            AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-results \
-              --query-execution-id "$QID" --output table
-            break
-          elif [ "$STATE" = "FAILED" ] || [ "$STATE" = "CANCELLED" ]; then
-            AWS_PROFILE={{.AWS_PROFILE_NAME}} aws athena get-query-execution \
-              --query-execution-id "$QID" \
-              --query 'QueryExecution.Status.StateChangeReason' --output text
-            break
-          fi
-          sleep 2
-        done
-
-  athena:demo:
-    desc: Run demo queries showing end-to-end data flow
-    cmds:
-      - |
-        WS={{.TF_WORKSPACE | default "prod"}}
-        WG="data-engineers-${WS}"
-        echo "=== Raw MNPI Orders (count) ==="
-        task athena:query QUERY="SELECT count(*) AS raw_orders FROM raw_mnpi_${WS}.orders" WORKGROUP="${WG}"
-        echo ""
-        echo "=== Raw Non-MNPI Market Data (count) ==="
-        task athena:query QUERY="SELECT count(*) AS raw_ticks FROM raw_nonmnpi_${WS}.market_data" WORKGROUP="${WG}"
-        echo ""
-        echo "=== Curated Order Events ==="
-        task athena:query QUERY="SELECT count(*) AS curated_orders FROM curated_mnpi_${WS}.order_events" WORKGROUP="${WG}"
-        echo ""
-        echo "=== Analytics: Order Summary by Instrument ==="
-        task athena:query QUERY="SELECT instrument_id, total_orders, buy_orders, sell_orders, total_volume FROM analytics_mnpi_${WS}.order_summary ORDER BY total_orders DESC" WORKGROUP="${WG}"
-        echo ""
-        echo "=== Analytics: Market Summary by Ticker ==="
-        task athena:query QUERY="SELECT ticker, tick_count, avg_price, avg_spread, spread_pct FROM analytics_nonmnpi_${WS}.market_summary ORDER BY tick_count DESC" WORKGROUP="${WG}"
