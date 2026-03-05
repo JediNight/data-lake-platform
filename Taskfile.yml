@@ -451,7 +451,8 @@ tasks:
       # Phase 1: Deploy all stacks (creates AWS infra in dev workspace)
       - task: deploy:all
 
-      # Phase 2: Build & load custom Kafka Connect image (Strimzi needs this)
+      # Phase 2: Build & load container images into Kind
+      #   Must happen BEFORE ArgoCD syncs, otherwise pods get ImagePullBackOff.
       - |
         echo ""
         echo "Building Kafka Connect image with Iceberg JARs..."
@@ -460,6 +461,12 @@ tasks:
           dev/gitops/strimzi/docker/
         echo "Loading image into Kind cluster..."
         kind load docker-image data-lake-connect:local --name {{.CLUSTER_NAME}}
+      - |
+        echo ""
+        echo "Building Producer API image..."
+        docker build -t producer-api:local dev/producer-api/
+        echo "Loading image into Kind cluster..."
+        kind load docker-image producer-api:local --name {{.CLUSTER_NAME}}
 
       # Phase 3: AWS credentials are now managed by KSOPS (secret-generator.yaml
       #   in dev/gitops/strimzi/overlays/localdev/). ArgoCD decrypts the
