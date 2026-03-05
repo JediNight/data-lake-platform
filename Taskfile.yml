@@ -680,6 +680,22 @@ tasks:
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform init -upgrade -input=false
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace select {{.WORKSPACE | default "dev"}} 2>/dev/null || AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform workspace new {{.WORKSPACE | default "dev"}}
       - AWS_PROFILE={{.AWS_PROFILE_NAME}} terraform apply -auto-approve
+      # Post-deploy: upload connector plugins, init CDC, start Glue (prod only)
+      - |
+        WORKSPACE="{{.WORKSPACE | default "dev"}}"
+        if [ "$WORKSPACE" = "prod" ]; then
+          echo ""
+          echo "Running post-deploy setup for prod..."
+          echo "Uploading MSK Connect connector JARs..."
+          ../../scripts/upload-connector-plugins.sh prod
+          echo ""
+          echo "Initializing Aurora CDC (replication slot + publication + seed tables)..."
+          ../../scripts/init-aurora-cdc.sh prod
+          echo ""
+          echo "Starting Glue medallion workflow..."
+          AWS_PROFILE={{.AWS_PROFILE_NAME}} aws glue start-workflow-run --name datalake-medallion-prod --region {{.SSO_REGION}}
+          echo "Post-deploy complete."
+        fi
 
   deploy:tier-1:
     desc: "Deploy independent stacks (foundation + data-lake-core) in parallel"

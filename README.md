@@ -78,20 +78,8 @@ task tf:init-all
 task tf:plan-all
 
 # Deploy everything (tiers run in parallel where possible)
+# Prod automatically uploads connector plugins, inits Aurora CDC, and starts Glue ETL
 task deploy:all WORKSPACE=prod
-```
-
-### Post-Deploy (one-time setup)
-
-```bash
-# Upload MSK Connect connector JARs to S3
-./scripts/upload-connector-plugins.sh prod
-
-# Initialize Aurora CDC (replication slot + publication + seed tables)
-./scripts/init-aurora-cdc.sh prod
-
-# Kick off the Glue medallion workflow
-AWS_PROFILE=data-lake aws glue start-workflow-run --name datalake-medallion-prod
 
 # Verify the full pipeline end-to-end (~3 min)
 task reviewer:e2e
@@ -187,4 +175,3 @@ mise.toml              Tool versions (terraform, kubectl, helm, etc.)
 
 - **[`docs/REVIEWER_GUIDE.md`](docs/REVIEWER_GUIDE.md)** — Self-service reviewer onboarding with step-by-step verification
 - **[`docs/documentation.md`](docs/documentation.md)** — Full platform docs (data model, security controls, ETL lineage)
-- **[`docs/plans/`](docs/plans/)** — Design documents and implementation plans
